@@ -14,6 +14,7 @@ function update_text_in_modal() {
     var group;
     group = $(".tableview:visible").attr("group-number");
     if (group) mode = mode + group;
+    
     $(".pdb_selected", oTable[mode].cells().nodes()).each(function() {
         if ($(this).prop("checked")) {
             $(this).closest("tr").addClass("selected");
@@ -27,6 +28,7 @@ function update_text_in_modal() {
         }
     });
 
+    mode = $("ul#mode_nav").find("li.active").find("a").text().trim();
     if (mode === "Single set of structures" || $("#single-group-tree-tab").length) {
         total_selected = pdbs.length;
         selected_visible = $(".dataTables_scrollBody:visible .pdb_selected:checked").length;
@@ -357,7 +359,6 @@ function create_overlay(table_id) {
             $(":checkbox", this).trigger("click");
             if ($(":checkbox", this).length === 0) {
                 var pdb_id = $(this).attr("id").split("_")[1];
-                console.log(pdb_id);
                 var checkbox = $(".dataTables_scrollBody").find("#" + pdb_id);
                 checkbox.trigger("click");
             }
@@ -375,8 +376,6 @@ function showPDBtable(element) {
     mode_without_space = mode.replace(/ /g, "_");
 
     if (!$.fn.DataTable.isDataTable(element + " .tableview table")) {
-        console.log(mode);
-
         $(element + " #best_species").html('<div class2="pull-right">\
                                             <div class="btn-group btn-toggle" column="7" mode="'+ mode +'"> \
                                             <button class="btn btn-xs btn-default" value="On">&nbsp;</button> \
@@ -502,7 +501,7 @@ function showPDBtable(element) {
                 null,
                 null,
                 null,
-            ]
+            ],
         });
         console.timeEnd("DataTable");
         console.time("yadcf");
@@ -520,7 +519,7 @@ function showPDBtable(element) {
                     select_type: "select2",
                     column_data_type: "html",
                     html_data_type: "text",
-                    filter_default_label: "IUPHAR",
+                    filter_default_label: "GtoPdb",
                     filter_match_mode: "exact",
                     filter_reset_button_text: false,
                 },
@@ -588,7 +587,7 @@ function showPDBtable(element) {
                     column_number: 9,
                     filter_type: "multi_select",
                     select_type: "select2",
-                    filter_default_label: "Method",
+                    filter_default_label: "Type",
                     select_type_options: {
                         width: "70px"
                     },
@@ -696,7 +695,7 @@ function showPDBtable(element) {
                     column_number: 16,
                     filter_type: "multi_select",
                     select_type: "select2",
-                    filter_default_label: "Sign Prot",
+                    filter_default_label: "Family",
                     select_type_options: {
                         width: "70px"
                     },
@@ -706,7 +705,7 @@ function showPDBtable(element) {
                     column_number: 17,
                     filter_type: "multi_select",
                     select_type: "select2",
-                    filter_default_label: "Family",
+                    filter_default_label: "Subtype",
                     select_type_options: {
                         width: "70px"
                     },
@@ -801,8 +800,6 @@ function showPDBtable(element) {
         // yadcf.exFilterColumn(oTable[mode], [
         //     [21, "*Only show mammalian structures and those from human or closest species"],
         //   ]);
-
-
 
         oTable[mode].on("draw.dt", function(e, oSettings) {
             console.time("create_overlay");
