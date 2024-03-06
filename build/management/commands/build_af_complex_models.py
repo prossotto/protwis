@@ -653,17 +653,17 @@ class Command(BaseBuild):
         #     return
 
     def purge_structures(self):
-        models = Structure.objects.filter(structure_type__slug='af-signprot')
+        models = Structure.objects.filter(structure_type__slug__in=['af-signprot', 'af-arrestin'])
         for m in models:
             PdbData.objects.filter(pdb=m.pdb_data.pdb).delete()
             WebLink.objects.filter(index=m.pdb_code.index).delete()
         models.delete()
-        ResidueFragmentInteraction.objects.filter(structure_ligand_pair__structure__structure_type__slug='af-signprot').delete()
+        ResidueFragmentInteraction.objects.filter(structure_ligand_pair__structure__structure_type__slug__in=['af-signprot', 'af-arrestin']).delete()
         # ResidueFragmentInteractionType.objects.all().delete()
-        StructureLigandInteraction.objects.filter(structure__structure_type__slug='af-signprot').delete()
+        StructureLigandInteraction.objects.filter(structure__structure_type__slug__in=['af-signprot', 'af-arrestin']).delete()
         #Remove previous Rotamers/Residues to prepare repopulate
-        Fragment.objects.filter(structure__structure_type__slug='af-signprot').delete()
-        Rotamer.objects.filter(structure__structure_type__slug='af-signprot').delete()
+        Fragment.objects.filter(structure__structure_type__slug__in=['af-signprot', 'af-arrestin']).delete()
+        Rotamer.objects.filter(structure__structure_type__slug__in=['af-signprot', 'af-arrestin']).delete()
         # PdbData.objects.all().delete()
 
     @staticmethod
@@ -958,7 +958,7 @@ class Command(BaseBuild):
                 display_name = g_prot_dict[signprot.entry_name.split('_')[0].upper()]
                 cat = 'G alpha'
             except:
-                display_name = 'arrestin'
+                display_name = arr_dict[signprot.entry_name]
                 cat = 'Arrestin'
 
             sep = StructureExtraProteins.objects.get_or_create(display_name=display_name, note=None, chain='B', category=cat, wt_coverage=100, protein_conformation=signprot_conf, structure=struct, wt_protein=signprot)

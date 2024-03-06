@@ -9,13 +9,15 @@ from django.utils.text import slugify
 from django.views.decorators.cache import cache_page
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import TemplateView
-from protwis.context_processors import current_site
+from django.utils.safestring import mark_safe
+from django.db.models import Q
+
 from common import definitions
 from common.diagrams_gpcr import DrawSnakePlot
 from common.diagrams_gprotein import DrawGproteinPlot
 from common.phylogenetic_tree import PhylogeneticTreeGenerator
 from common.views import AbsTargetSelection
-from common.models import Publication
+from common.models import Publication, WebLink
 from contactnetwork.models import InteractingResiduePair
 from mutation.models import MutationExperiment
 from protein.models import (Gene, Protein, ProteinAlias, ProteinConformation, ProteinFamily,
@@ -30,10 +32,13 @@ from structure.models import Structure
 
 import json
 import time
+from itertools import combinations, chain
+import re
 
 from collections import Counter, OrderedDict
 from copy import deepcopy
 from statistics import mean
+import pandas as pd  #### ERASE
 
 
 class BrowseSelection(AbsTargetSelection):
@@ -130,14 +135,243 @@ class TargetSelection(AbsTargetSelection):
         },
     }
 
-def CouplingHandler(request):
-    domain = current_site(request)
-    origin = domain['current_site']
-    if origin == 'gprotein':
-        return CouplingBrowser.as_view()(request).render()
-    elif origin == 'arrestin':
-        return CouplingBrowser_deprecated.as_view(subunit_filter = "200_000_001", families = ["Beta"], page='arrestin')(request).render()
+class PhosphorylationBrowser(TemplateView):
 
+    template_name = 'signprot/phosphorylation_sites.html'
+
+    signprot = 'Arrestin'
+
+    patterns = {
+    #              P    x     P      P
+    'PxPP': r'((?:S|T)[^ST](?:S|T)(?:S|T))',
+    #                 P     x    P     x     x    P/E/D
+    'PxPxxPED':r'((?:S|T)[^ST](?:S|T)[^ST][^ST](?:S|T|E|D))',
+    #                 P     x    x      P    x    x     P/E/D
+    'PxxPxxPED':r'((?:S|T)[^ST][^ST](?:S|T)[^ST][^ST](?:S|T|E|D))',
+    #
+    'longest':r'((?:(?:S|T|E|D)[^STED]{1,2})+(?:S|T|E|D))',
+    }
+
+    def get_context_data(self, **kwargs):
+
+        context = super().get_context_data(**kwargs)
+
+        sites, coupling_labels = self.calculating()
+
+        context['fixed_rows'] = ['gpcr', 'gtodb', 'family', 'class']
+        context.update(self._headers())
+        context['coupling_labels'] = coupling_labels
+        context['sites'] = sites
+        return context
+
+    def _headers(self):
+        segments = ["icl2", "icl3", "C-term"]
+        all_sub_headers = [
+            "Seq",
+            "S/T",
+            "D/E",
+            "S/T/D/E",
+            "PxPP",
+            "PxPxxP/D/E",
+            "PxxPxxP/D/E",
+            "All",
+            mark_safe("Longest (no. AAs)<br>stretch of S/T/D/E<br>separated by<br> max two x:es<br>(non-S/T/D/E)."),
+            mark_safe("Where of<br>S/T/D/E")
+        ]
+
+        # Generate all combinations of segments with its class assignment
+        all_combinations = [(' & '.join(combo).replace("C-term", 'C-terminus'), '_'.join(combo))  for r in range(1, len(segments) + 1) for combo in combinations(segments, r)]
+
+        # Combine main headers with sub-headers
+        headers = [(header, all_sub_headers if '&' not in header[0] else [h for h in all_sub_headers if h != "Seq"]) for header in all_combinations]
+        col_len = sum(len(header[1]) for header in headers)
+        # headers.append(col_len)
+
+        d1 = {'headers': headers, 'col_len': col_len}
+
+        return d1
+
+    def segments(self):
+
+        protein_data = []
+
+        # Define a queryset for protein_couplings
+        protein_couplings_queryset = ProteinCouplings.objects.filter(
+            g_protein__parent__name=self.signprot,
+             other_protein__isnull=True
+        ).exclude(
+            variant__startswith='iso'
+        ).select_related('g_protein_subunit'
+        ).order_by('g_protein_subunit__entry_name', 'variant')
+
+        coupling_labels_raw = protein_couplings_queryset.values_list(
+            'g_protein_subunit__entry_name', 'variant'
+        ).distinct()
+
+        coupling_labels = [(label.split('_')[0].upper(), variant) for label, variant in coupling_labels_raw if label != None]
+
+        # queryset for proteincouplings
+        protein_couplings_prefetch = Prefetch(
+            'proteincouplings_set',  # Adjust the related name as necessary
+            queryset=protein_couplings_queryset,
+            to_attr='filtered_couplings')
+
+        web_links_prefetch = Prefetch(
+            'web_links',
+            queryset=WebLink.objects.filter(web_resource__id__in=[8, 5]).select_related('web_resource'), to_attr='links')
+
+        # fetching all proteins
+        prots = Protein.objects.filter(
+            proteincouplings__g_protein__parent__name=self.signprot
+        ).distinct().select_related(
+            'family', 'family__parent__parent__parent'
+        ).prefetch_related(
+            'proteinconformation_set__residue_set__protein_segment',
+            protein_couplings_prefetch,
+            web_links_prefetch
+        ).only(
+            'entry_name', 'name', 'family',)
+
+        for protein in prots:
+
+            sequences = {}
+            uniprot = [link for link in getattr(protein, 'links', []) if 'uniprot' in link.web_resource.url]
+            try:
+                sequences['uniprot'] = [mark_safe(f'<a href="{uniprot[1]}" target="_blank">{protein.entry_name.split("_")[0].upper()}</a>'), '']
+            except:
+                sequences['uniprot'] = [mark_safe(f'<a href="{uniprot}" target="_blank">{protein.entry_name.split("_")[0].upper()}</a>'), '']
+
+            gtodb = [link for link in getattr(protein, 'links', []) if 'guide' in link.web_resource.url]
+            if gtodb:
+                sequences['gtodb'] = [mark_safe(f'<a href="{gtodb[0]}" target="_blank">{protein.name.split("_")[0].replace(" receptor", "").replace("-adrenoceptor", "")}</a>'), '']
+            else:
+                sequences['gtodb'] = [protein.name.replace("receptor", "").replace("-adrenoceptor", ""), '']
+
+            sequences['family'] = [(protein.family.parent.name.replace('receptors','').replace('Class', '')), '']
+            sequences['class'] = [(protein.family.parent.parent.parent.name.split(' ')[1]), '']
+            sequences['logemaxec50'] = [
+                (ec.g_protein_subunit, ec.logemaxec50,  ec.variant) for ec in getattr(protein, 'filtered_couplings', [])
+            ]
+
+            segment_sequences = {'ICL2': '', 'ICL3': '', 'C-term': ''} # Chosen segments
+            # Iterate through each protein conformation
+            for conf in protein.proteinconformation_set.all():
+                # Build sequences for each segment
+
+                for seg in conf.residue_set.all():
+                    slug = seg.protein_segment.slug
+                    if slug in segment_sequences:
+                        segment_sequences[slug] += seg.amino_acid
+
+            for segment, seq in segment_sequences.items():
+                sequences[segment.lower()] = seq
+
+            protein_data.append(sequences)
+
+        return protein_data, coupling_labels
+
+    def sequence_analyzer(self, data, column, patterns):
+
+        data[f'{column}_seq'] = [data[column], column]
+        data[f'{column}_ST'] = [data[column].count('S') + data[column].count('T'), column ]
+        data[f'{column}_DE'] = [data[column].count('D') + data[column].count('E'), column ]
+        data[f'{column}_STDE'] = [data[f'{column}_ST'][0] + data[f'{column}_DE'][0], column]
+
+        for key, val in patterns.items():
+            if key != 'longest':
+                data[f'{column}_{key}'] = [data[column].count(val), column]
+            else:
+                continue
+
+        keys_to_sum = [key for key in patterns.keys() if key != 'longest']
+        data[f'{column}_All'] = [sum(data[f'{column}_{key}'][0] for key in keys_to_sum), column]
+        data[f'{column}_sites'] = [re.findall(patterns['longest'], data[column]), column]
+        data[f'{column}_longest'] = [max((len(x) for x in data[f'{column}_sites'][0] if x), default=0), column]
+        data[f'{column}_long_STDE'] = [max(self.count_specific_res_(data[f'{column}_sites'][0])), column]
+
+        del data[column]
+        del data[f'{column}_sites']
+
+    def combinations(self, data,  segments):
+
+        segments = segments
+        all_combinations = list(chain.from_iterable(combinations(segments, r) for r in range(2, len(segments)+1)))
+
+        # Convert tuples to strings
+        sums = ['_'.join(comb) for comb in all_combinations]
+
+        cols = ["ST", "DE", "STDE"] + [col for col in self.patterns.keys() if col != 'longest'] + ['All', 'longest', 'long_STDE']
+
+        for sum_comb in sums:
+            sections_to_sum = sum_comb.split('_')
+
+            for col_suffix in cols:
+                columns_to_sum = [f"{section}_{col_suffix}" for section in sections_to_sum]
+
+                if col_suffix in ['longest', 'long_STDE']:
+                    # Use max for 'longest' and 'long_STDE'
+                    data[f"{sum_comb}_{col_suffix}"] = [max(data[col][0] for col in columns_to_sum), sum_comb]
+                else:
+                    # Use sum for other columns
+                        data[f"{sum_comb}_{col_suffix}"] = [sum(data[col][0] for col in columns_to_sum), sum_comb]
+
+    def count_specific_res_(self, strings, letters=["S", "T", "D", "E"]):
+
+        if strings:
+            # Find the length of the largest string(s)
+            max_length = max(len(s) for s in strings)
+
+            # Filter strings that are of maximum length
+            largest_strings = [s for s in strings if len(s) == max_length]
+
+            # Count occurrences of specified letters in each of the largest strings
+            counts = [sum(s.count(letter) for letter in letters) for s in largest_strings]
+
+        else:
+            counts = [0]
+
+        return counts
+
+    def calculating(self, cols=['icl2', 'icl3', 'c-term']):
+
+        data = self.segments()
+        sites = data[0]
+        labels = data[1]
+        [[self.sequence_analyzer(dic, segment, self.patterns) for dic in sites] for segment in cols]
+        [self.combinations(dic, cols) for dic in sites]
+
+        return sites, labels
+
+####### lazy loader
+
+class LazyDataLoader:
+
+    def __init__(self, load_function,index=None, *args, **kwargs):
+        self._loaded_data = None
+        self._load_function = load_function
+        self._args = args
+        self._kwargs = kwargs
+        self.index = index
+
+    def _load_data(self):
+        if self._loaded_data is None:
+            if self.index == None:
+                self._loaded_data = self._load_function(*self._args, **self._kwargs)
+            else:
+                self._loaded_data = self._load_function(*self._args, **self._kwargs)[self.index]
+        return self._loaded_data
+
+    def __getattr__(self, name):
+        return getattr(self._load_data(), name)
+
+    def __getitem__(self, key):
+        return self._load_data()[key]
+
+    def __iter__(self):
+        return iter(self._load_data())
+
+    def __len__(self):
+        return len(self._load_data())
 
 class CouplingBrowser(TemplateView):
     """Class based generic view which serves family specific coupling data between Receptors and G-proteins.
@@ -505,8 +739,8 @@ class CouplingBrowser_deprecated(TemplateView):
 
     @method_decorator(csrf_exempt)
     def get_context_data(self, **kwargs):
+        print('CouplingBrowser_deprecated get_context_data called')
         context = super().get_context_data(**kwargs)
-
         tab_fields, header = self.tab_fields(self.subunit_filter, self.families)
 
         context['tabfields'] = tab_fields
@@ -514,7 +748,6 @@ class CouplingBrowser_deprecated(TemplateView):
         flat_list = [item for sublist in header.values() for item in sublist]
         context['subunitheader'] = flat_list
         context['page'] = self.page
-
         return context
 
     @staticmethod
