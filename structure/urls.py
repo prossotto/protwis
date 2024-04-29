@@ -11,7 +11,7 @@ urlpatterns = [
     url(r'^g_protein_structure_browser$', cache_page(60*60*24)(EffectorStructureBrowser.as_view(effector='gprot')), name='g_protein_structure_browser'),
     # url(r'^g_protein_structure_browser$', EffectorStructureBrowser.as_view(effector='gprot'), name='g_protein_structure_browser'),
     url(r'^arrestin_structure_browser$', cache_page(60*60*24)(EffectorStructureBrowser.as_view(effector='arrestin')), name='arrestin_structure_browser'),
-
+    url(r'^sign_complex_pdb$', SignComplexPdb, name="sign_complex_pdb"),
     url(r'^browser$', RedirectBrowser, name='redirect_browser'),
     url(r'^selection_convert$', ConvertStructuresToProteins, name='convert'),
     url(r'^selection_convert_model$', ConvertStructureModelsToProteins, name='convert_mod'),
@@ -79,5 +79,6 @@ urlpatterns = [
     # url(r'^complex_models/view/(?P<modelname>\w+)-(?P<signprot>\w+)$', ServeComplexModDiagram, name='complexmod_serve_view'),
     url(r'^complex_models/view/(?P<modelname>\w+)$', ServeComplexModDiagram, name='complexmod_serve_view'),
     url(r'^pdb/(?P<pdbname>\w+)/ligand/(?P<ligand>.+)$', ServePdbLigandDiagram, name='structure_serve_pdb_ligand'),
+
 
 ]
