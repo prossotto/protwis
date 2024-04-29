@@ -12,7 +12,6 @@ from django.views.generic import TemplateView
 from django.utils.safestring import mark_safe
 from django.db.models import Q
 
-from protwis.context_processors import current_site
 from common import definitions
 from common.diagrams_gpcr import DrawSnakePlot
 from common.diagrams_gprotein import DrawGproteinPlot
@@ -134,7 +133,7 @@ class TargetSelection(AbsTargetSelection):
             'url': '#',
             'color': 'success',
         },
-    }        
+    }
 
 class PhosphorylationBrowser(TemplateView):
 
@@ -154,7 +153,7 @@ class PhosphorylationBrowser(TemplateView):
     }
 
     def get_context_data(self, **kwargs):
-        
+
         context = super().get_context_data(**kwargs)
 
         sites, coupling_labels = self.calculating()
@@ -168,19 +167,19 @@ class PhosphorylationBrowser(TemplateView):
     def _headers(self):
         segments = ["icl2", "icl3", "C-term"]
         all_sub_headers = [
-            "Seq", 
-            "S/T", 
-            "D/E", 
-            "S/T/D/E", 
-            "PxPP", 
-            "PxPxxP/D/E", 
-            "PxxPxxP/D/E", 
-            "All", 
+            "Seq",
+            "S/T",
+            "D/E",
+            "S/T/D/E",
+            "PxPP",
+            "PxPxxP/D/E",
+            "PxxPxxP/D/E",
+            "All",
             mark_safe("Longest (no. AAs)<br>stretch of S/T/D/E<br>separated by<br> max two x:es<br>(non-S/T/D/E)."),
             mark_safe("Where of<br>S/T/D/E")
         ]
 
-        # Generate all combinations of segments with its class assignment 
+        # Generate all combinations of segments with its class assignment
         all_combinations = [(' & '.join(combo).replace("C-term", 'C-terminus'), '_'.join(combo))  for r in range(1, len(segments) + 1) for combo in combinations(segments, r)]
 
         # Combine main headers with sub-headers
@@ -220,7 +219,7 @@ class PhosphorylationBrowser(TemplateView):
         web_links_prefetch = Prefetch(
             'web_links',
             queryset=WebLink.objects.filter(web_resource__id__in=[8, 5]).select_related('web_resource'), to_attr='links')
-        
+
         # fetching all proteins
         prots = Protein.objects.filter(
             proteincouplings__g_protein__parent__name=self.signprot
@@ -270,7 +269,7 @@ class PhosphorylationBrowser(TemplateView):
             protein_data.append(sequences)
 
         return protein_data, coupling_labels
-    
+
     def sequence_analyzer(self, data, column, patterns):
 
         data[f'{column}_seq'] = [data[column], column]
@@ -283,7 +282,7 @@ class PhosphorylationBrowser(TemplateView):
                 data[f'{column}_{key}'] = [data[column].count(val), column]
             else:
                 continue
-        
+
         keys_to_sum = [key for key in patterns.keys() if key != 'longest']
         data[f'{column}_All'] = [sum(data[f'{column}_{key}'][0] for key in keys_to_sum), column]
         data[f'{column}_sites'] = [re.findall(patterns['longest'], data[column]), column]
@@ -340,7 +339,7 @@ class PhosphorylationBrowser(TemplateView):
         labels = data[1]
         [[self.sequence_analyzer(dic, segment, self.patterns) for dic in sites] for segment in cols]
         [self.combinations(dic, cols) for dic in sites]
-        
+
         return sites, labels
 
 ####### lazy loader
@@ -373,15 +372,6 @@ class LazyDataLoader:
 
     def __len__(self):
         return len(self._load_data())
-    
-def CouplingHandler(request):
-    domain = current_site(request)
-    origin = domain['current_site']
-    if origin == 'gprotein':
-        return CouplingBrowser.as_view()(request).render()
-    elif origin == 'arrestin':
-        return CouplingBrowser_deprecated.as_view(subunit_filter = "200_000_001", families = ["Beta"], page='arrestin')(request).render()
-
 
 class CouplingBrowser(TemplateView):
     """Class based generic view which serves family specific coupling data between Receptors and G-proteins.
