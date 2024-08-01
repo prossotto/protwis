@@ -1,0 +1,50 @@
+{% extends "home/base.html" %}
+{% block content %}
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLAST Results</title>
+</head>
+<body>
+
+    <div id="results">
+        {% if output_content %}
+        <table id="results_table" class="display">
+            <thead>
+                <tr>
+                    <th>Target</th>
+                    <th>TTM Score</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in output_content.splitlines %}
+                    {% if line %}
+                    <tr>
+                        {% for item in line.split(',') %}
+                        <td>{{ item }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        {% elif error_message %}
+        <p>{{ error_message }}</p>
+        {% endif %}
+    </div>
+    
+    <script>
+        $(document).ready(function() {
+            $('#results_table').DataTable();
+        });
+    </script>
+    HEY
+    {% if output_content %}
+    <h2>Results:</h2>
+    <pre>{{ output_content }}</pre>
+    {% elif error_message %}
+    <h2>Error:</h2>
+    <p>{{ error_message }}</p>
+    {% endif %}
+</body>
+{% endblock %}
