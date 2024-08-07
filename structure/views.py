@@ -1,11 +1,13 @@
 from django.shortcuts import render
+from django.core.files.storage import default_storage #### ERASE
+import subprocess ### ERASE
 from django.conf import settings
 from django.views.generic import TemplateView, View
-from django.http import HttpResponse, HttpResponseRedirect
-from django.db.models import Count, Q, Prefetch, TextField, Avg
+from django.http import HttpResponse, HttpResponseRedirect, JsonResponse, StreamingHttpResponse
+from django.db.models import Count, Q, Prefetch, TextField, Avg, Case, When, CharField
 from django.db.models.functions import Concat
 from django import forms
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.core.cache import cache
 from protwis.context_processors import current_site
 from common.phylogenetic_tree import PhylogeneticTreeGenerator
@@ -27,6 +29,13 @@ from common.models import ReleaseNotes
 from common.alignment import Alignment, GProteinAlignment
 from residue.models import Residue, ResidueNumberingScheme, ResiduePositionSet
 from contactnetwork.models import Interaction
+
+import requests
+from django.views.decorators.csrf import csrf_exempt
+from django.core.files.storage import FileSystemStorage
+import subprocess
+import time
+import base64
 
 import io
 import numpy as np
@@ -53,6 +62,13 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 import smtplib
+
+import docker #ERASE
+import tarfile #ERASE
+import uuid
+import tempfile
+import threading
+import queue
 
 class_dict = {'001':'A','002':'B1','003':'B2','004':'C','005':'D1','006':'F','007':'T','008':'O'}
 
@@ -3934,3 +3950,1088 @@ def SignComplexPdb(request):
     response['Content-Disposition'] = 'attachment; filename="pdb_structures.zip"'
     
     return response
+
+# def submit_pdb_file(request):
+#     if request.method == 'POST' and request.FILES['myfile']:
+#         myfile = request.FILES['myfile']
+#         fs = FileSystemStorage()
+#         filename = fs.save(myfile.name, myfile)
+#         file_path = fs.path(filename)
+
+#         url = 'https://search.foldseek.com/api/ticket'
+#         files = {'q': open(file_path, 'rb')}
+#         data = {'mode': 'complex-tmalign', 'database[]': 'pdb100'}
+
+#         response = requests.post(url, files=files, data=data)
+
+#         # Cleanup the file if you don't want to keep it
+#         fs.delete(filename)
+
+#         return JsonResponse({'status': 'success', 'response': response.text})
+
+#     # Handle GET request by showing the form
+#     return render(request, 'structure_blast.html')
+
+
+import subprocess
+# def submit_pdb_file(request):
+#     if request.method == 'POST':
+#         pdb_file = request.FILES.get('pdb_file')
+#         if pdb_file:
+#             try:
+#                 # Save the uploaded file to a temporary location
+#                 with open('temp.pdb', 'wb') as f:
+#                     for chunk in pdb_file.chunks():
+#                         f.write(chunk)
+
+#                 # Execute the CURL command
+#                 cmd = ["curl", "-X", "POST", "-F", f"q=@temp.pdb", "-F", "mode=complex-tmalign", "-F", "database[]=pdb100", "https://search.foldseek.com/api/ticket"]
+#                 result = subprocess.run(cmd, capture_output=True, text=True)
+                
+#                 # Display the result
+#                 return HttpResponse(result.stdout)
+#             except Exception as e:
+#                 return HttpResponse(f"An error occurred: {str(e)}")
+#         else:
+#             return HttpResponse("No file uploaded.")
+#     else:
+#         return render(request, 'structure_blast.html')
+
+def parse_blast_tab(response_text):
+    # Split the response text into lines
+    lines = response_text.strip().split('\n')
+    
+    # Parse each line
+    hits = []
+    for line in lines:
+        fields = line.split('\t')
+        hit = {
+            'query_id': fields[0],
+            'subject_id': fields[1],
+            'percent_identity': float(fields[2]),
+            # Add more fields as needed
+        }
+        hits.append(hit)
+    
+    return hits
+
+# def submit_pdb_file(request):
+#     if request.method == 'POST':
+#         pdb_file = request.FILES.get('pdb_file')
+#         if pdb_file:
+#             try:
+#                 # Save the uploaded file to a temporary location
+#                 with open('temp.pdb', 'wb') as f:
+#                     for chunk in pdb_file.chunks():
+#                         f.write(chunk)
+
+#                 # Execute the CURL command
+#                 cmd = ["curl", "-X", "POST", "-F", f"q=@temp.pdb", "-F", "mode=complex-tmalign", "-F", "database[]=pdb100", "https://search.foldseek.com/api/ticket"]
+#                 result = subprocess.run(cmd, capture_output=True, text=True)
+                
+#                 # Parse the ticket ID from the response
+#                 response_json = json.loads(result.stdout)
+#                 ticket_id = response_json['id']
+#                 print(f'TICKET ID: {ticket_id}')
+
+#                 # Poll the Foldseek server until the process is completed
+#                 status_url = f'https://search.foldseek.com/api//ticket/{ticket_id}'
+#                 while True:
+#                     print('HERE')
+#                     response = requests.get(status_url)
+#                     response_json = response.json()
+#                     print(response_json)
+#                     if response_json['status'] == 'COMPLETE':
+#                         break
+#                     elif response_json['status'] == 'FAILED':
+#                         return HttpResponse("Error: Process failed.")
+#                     time.sleep(5)  # Wait for 5 seconds before checking again
+                
+#                 # Once the process is completed, fetch the result
+#                 result_url = f'https://search.foldseek.com/api/result/download/{ticket_id}'
+#                 final_result = requests.get(result_url).text
+                
+#                 # Display the final result
+#                 return HttpResponse(final_result)
+#             except Exception as e:
+#                 return HttpResponse(f"An error occurred: {str(e)}")
+#         else:
+#             return HttpResponse("No file uploaded.")
+#     else:
+#         return render(request, 'structure_blast.html')
+
+def submit_pdb_file(request):
+    if request.method == 'POST':
+        pdb_file = request.FILES.get('pdb_file')
+        if pdb_file:
+            try:
+                # Save the uploaded file to a temporary location
+                with open('temp.pdb', 'wb') as f:
+                    for chunk in pdb_file.chunks():
+                        f.write(chunk)
+
+                # Execute the CURL command
+                cmd = ["curl", "-X", "POST", "-F", f"q=@temp.pdb", "-F", "mode=complex-tmalign", "-F", "database[]=pdb100", "https://search.foldseek.com/api/ticket"]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                # Parse the ticket ID from the response
+                response_json = json.loads(result.stdout)
+                ticket_id = response_json['id']
+
+                # Poll the Foldseek server until the process is completed
+                status_url = f'https://search.foldseek.com/api/ticket/{ticket_id}'
+                while True:
+                    response = requests.get(status_url)
+                    response_json = response.json()
+                    if response_json['status'] == 'COMPLETE':
+                        break
+                    elif response_json['status'] == 'FAILED':
+                        return HttpResponse("Error: Process failed.")
+                    time.sleep(5)  # Wait for 5 seconds before checking again
+                
+                # Once the process is completed, fetch the result
+                result_url = f'https://search.foldseek.com/api/result/download/{ticket_id}'
+                final_result = requests.get(result_url).content
+
+                # Convert the content to base64 for safe URL embedding
+                final_result_content = base64.b64encode(final_result).decode('utf-8')
+                
+                # Render the result in a template
+                return render(request, 'blast_result.html', {'final_result': final_result_content})
+            except Exception as e:
+                return HttpResponse(f"An error occurred: {str(e)}")
+        else:
+            return HttpResponse("No file uploaded.")
+    else:
+        return render(request, 'structure_blast.html')
+
+
+
+class SearchForm(forms.Form):
+    input_file = forms.FileField(label='Input File')
+    target_db = forms.FileField(label='Target Database')
+    sensitivity = forms.ChoiceField(choices=[('1.0', 'Fast'), ('7.5', 'Sensitive'), ('9.5', 'Very Sensitive')])
+    # Add other form fields as needed based on the options you want to expose
+
+
+
+# import tempfile
+# import subprocess
+# from django.http import HttpResponse
+# from django.shortcuts import render
+
+
+class ResidueBFactorSelect(Select):
+    """
+    A selection class for filtering residues based on the B-factor of their CA atoms.
+    
+    Attributes:
+    -----------
+    bfactor_range : tuple
+        A tuple specifying the inclusive range of B-factors to select residues.
+    """
+    def __init__(self, bfactor_range=(1.0, 9.0)):
+        """
+        Initializes the selection object with the specified B-factor range.
+        
+        Parameters:
+        -----------
+        bfactor_range : tuple, optional
+            The inclusive range of B-factors to select residues. Default is (7.0, 8.9).
+        """
+        self.bfactor_range = bfactor_range
+
+    def accept_residue(self, residue):
+        """
+        Checks if a residue should be accepted based on the B-factor of its CA atom.
+        
+        Parameters:
+        -----------
+        residue : Bio.PDB.Residue
+            The residue to check.
+        
+        Returns:
+        --------
+        bool
+            True if the residue should be accepted (CA atom's B-factor is within the range), False otherwise.
+        """
+        for atom in residue:
+            if atom.get_id() == 'CA':
+                bfactor = atom.get_bfactor()
+                if self.bfactor_range[0] <= bfactor < self.bfactor_range[1]:
+                    return True
+        return False
+
+
+
+
+class StructureBlastView(View):
+    template_name = 'structure_blast_org.html'
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+    def post(self, request):
+        input_file = request.FILES.get('input_file')
+        if not input_file:
+            return HttpResponse("No input file provided.", status=400)
+
+        temp_file_un_path = self.save_temp_file(input_file)
+
+        alignment_method = request.POST.get('alignment_method')
+        structure_method = request.POST.get('structure_type')
+        tm7_h8_value = request.POST.get('tm7_h8')
+        tm7_h8 = tm7_h8_value == 'True'
+
+        try:
+            temp_file_path, type_db = self.process_input_file(temp_file_un_path, tm7_h8)
+
+            alignment_type = self.get_alignment_type(alignment_method)
+            structure_type = self.get_structure_type(structure_method)
+
+            if alignment_type is None:
+                return HttpResponse("Invalid alignment method selected.", status=400)
+
+            fdb = os.path.join(settings.DATA_DIR, 'structure_data', f'{structure_type}{type_db}')
+            print(f'FDB: {fdb}')
+
+            # result_file_path = self.run_foldseek(temp_file_path, fdb, alignment_type)
+            result_file_path = self.docker_foldseek(temp_file_path, fdb, alignment_type)
+
+            if not result_file_path:
+                return HttpResponse("An error occurred during Foldseek execution.", status=500)
+
+            data = self.parse_results(result_file_path)
+            enhanced_data = self.enhance_data_with_db_info(data)
+
+            return render(request, self.template_name, {'data': enhanced_data})
+        finally:
+            self.cleanup_files([temp_file_un_path, temp_file_path])
+
+    @staticmethod
+    def save_temp_file(input_file):
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_input_un_file:
+            for chunk in input_file.chunks():
+                tmp_input_un_file.write(chunk)
+            tmp_input_un_file.flush()
+            return tmp_input_un_file.name
+
+    @staticmethod
+    def process_input_file(temp_file_un_path, tm7_h8):
+        if tm7_h8:
+            temp_file_path = temp_file_un_path
+            type_db = '_1'
+        else:
+            temp_file_path = temp_file_un_path
+            type_db = ''
+        return temp_file_path, type_db
+
+    @staticmethod
+    def get_alignment_type(alignment_method):
+        alignment_type_mapping = {
+            "3Di-align": 0,
+            "TM-align": 1,
+            "3Di+-align": 2
+        }
+        return alignment_type_mapping.get(alignment_method)
+
+    @staticmethod
+    def get_structure_type(structure_method):
+        structure_type_mapping = {
+            "alphafold": 'af_foldseek_db',
+            "refined": 'ref_foldseek_db',
+            "experimental": 'raw'
+        }
+        return structure_type_mapping.get(structure_method)
+
+    @staticmethod
+    def run_foldseek(temp_file_path, fdb, alignment_type):
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_result_file:
+            result_file_path = tmp_result_file.name
+            cmd = [
+                '/Users/vtk842/foldseek/foldseek/bin/foldseek',
+                'easy-search',
+                temp_file_path,
+                fdb,
+                result_file_path, '/tmp',
+                '--alignment-type', str(alignment_type),
+                '--format-output', "query,target,ttmscore,lddt,evalue"
+            ]
+            result = subprocess.run(cmd, capture_output=True)
+            if result.returncode != 0:
+                return None
+            return result_file_path
+        
+
+    def docker_foldseek1(self, temp_file_path, fdb, alignment_type):
+        client = docker.from_env()
+        container_name = 'foldseek_pers'
+
+        try:
+            container = client.containers.get(container_name)
+        except docker.errors.NotFound:
+            print(f"Container {container_name} not found")
+            return None  # Container not found, handle this error as needed
+
+        # Prepare input file
+        container_input_path = '/app/input.pdb'
+        tar_stream = self.create_tarfile(temp_file_path, arcname=os.path.basename(container_input_path))
+        container.put_archive(path=os.path.dirname(container_input_path), data=tar_stream)
+
+        # Prepare database path
+        container_db_path = '/app/db'
+        db_tar_stream = self.create_tarfile(fdb, arcname=os.path.basename(container_db_path))
+        container.put_archive(path=os.path.dirname(container_db_path), data=db_tar_stream)
+
+        # Prepare output file path
+        container_output_path = '/app/result.txt'
+
+        # Define the command
+        command = [
+            'foldseek', 'easy-search',
+            container_input_path,
+            container_db_path,
+            container_output_path,
+            '/tmp',
+            '--alignment-type', str(alignment_type),
+            '--format-output', "query,target,ttmscore,lddt,evalue"
+        ]
+
+        # Execute the command
+        exec_result = container.exec_run(command)
+
+        if exec_result.exit_code != 0:
+            print(f"Command failed with exit code {exec_result.exit_code}")
+            return None
+
+        # Copy result file from container
+        bits, stat = container.get_archive(container_output_path)
+
+        # Extract the file from the tar stream
+        output_dir = os.path.dirname(temp_file_path)  # Use the same directory as the input file
+        output_filename = 'foldseek_result.txt'
+        output_path = os.path.join(output_dir, output_filename)
+
+        tar_bytes = io.BytesIO()
+        for chunk in bits:
+            tar_bytes.write(chunk)
+
+        self.extract_file_from_tar(tar_bytes, os.path.basename(container_output_path), output_path)
+
+        return output_path
+
+    def docker_foldseek(self, temp_file_path, fdb, alignment_type):
+        client = docker.from_env()
+        container_name = 'foldseek_pers'
+        run_id = uuid.uuid4()  # Generate a unique ID for this run
+
+        try:
+            container = client.containers.get(container_name)
+        except docker.errors.NotFound:
+            print(f"Container {container_name} not found")
+            return None
+
+        print('BEFORE TRY')
+        try:
+            # Prepare input file
+            container_input_path = f'/app/input_{run_id}.pdb'
+            with self.create_tarfile(temp_file_path, arcname=os.path.basename(container_input_path)) as tar_stream:
+                container.put_archive(path=os.path.dirname(container_input_path), data=tar_stream)
+
+            # Prepare database path
+            print('INSIDE TRY')
+            container_db_path = f'/app/db_{run_id}'
+            with self.create_tarfile(fdb, arcname=os.path.basename(container_db_path)) as db_tar_stream:
+                container.put_archive(path=os.path.dirname(container_db_path), data=db_tar_stream)
+
+            # Prepare output file path
+            container_output_path = f'/app/result_{run_id}.txt'
+
+            # Define the command
+            command = [
+                'foldseek', 'easy-search',
+                container_input_path,
+                container_db_path,
+                container_output_path,
+                '/tmp',
+                '--alignment-type', str(alignment_type),
+                '--format-output', "query,target,ttmscore,lddt,evalue"
+            ]
+
+            # Execute the command
+            exec_result = container.exec_run(command)
+
+            if exec_result.exit_code != 0:
+                print(f"Command failed with exit code {exec_result.exit_code}")
+                return None
+
+            # Copy result file from container
+            bits, stat = container.get_archive(container_output_path)
+
+            # Extract the file from the tar stream
+            output_dir = tempfile.mkdtemp()  # Create a new temporary directory
+            output_filename = f'foldseek_result_{run_id}.txt'
+            output_path = os.path.join(output_dir, output_filename)
+
+            with io.BytesIO() as tar_bytes:
+                for chunk in bits:
+                    tar_bytes.write(chunk)
+                self.extract_file_from_tar(tar_bytes, os.path.basename(container_output_path), output_path)
+
+            return output_path
+
+        except Exception as e:
+            print(f"An error occurred: {str(e)}")
+            return None
+
+        finally:
+            # Cleanup
+            try:
+                container.exec_run(f"rm {container_input_path} {container_db_path} {container_output_path}")
+            except Exception as e:
+                print(f"Failed to clean up container files: {str(e)}")
+            
+    def create_tarfile(self, file_path, arcname):
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+            tar.add(file_path, arcname=arcname)
+        tar_stream.seek(0)
+        return tar_stream
+
+    def extract_file_from_tar(self, tar_stream, member_name, output_path):
+        tar_stream.seek(0)
+        with tarfile.open(fileobj=tar_stream, mode='r') as tar:
+            member = tar.getmember(member_name)
+            f = tar.extractfile(member)
+            with open(output_path, 'wb') as out_f:
+                out_f.write(f.read())
+
+    @staticmethod
+    def parse_results(result_file_path):
+        with open(result_file_path, 'r') as file:
+            output_content = file.readlines()
+
+        pdb_code_indices = set()
+        temp_data = []
+
+        for line in output_content:
+            values = line.split('\t')
+            input_split = values[0].rsplit('_', 1)
+            input_chain = input_split[1] if len(input_split) == 2 else 'N/A'
+            protein_info = values[1].split('info')
+            protein, origin_acr, _ = protein_info[0].rsplit('_', 2)
+            pdb_code_indices.add(protein)
+
+            chain = protein_info[1].replace('_', '') if protein_info[1] else 'N/A'
+            origin, linking, state = StructureBlastView.get_protein_origin_info(protein, origin_acr)
+
+            temp_data.append({
+                'input_chain': input_chain, "protein": protein, "chain": chain, "origin": origin, "linking": linking, 
+                "state": state, "TM_score": values[2], "E_value": values[4], "lddt":values[3]
+            })
+
+        return temp_data
+
+    @staticmethod
+    def get_protein_origin_info(protein, origin_acr):
+        if origin_acr == 'raw':
+            return 'Raw Experimental structure', protein, ''
+        elif origin_acr == 'af':
+            protein_data = protein.split('_human_')
+            return 'AF2 model', f'homology_models/{protein}', protein_data[1]
+        elif origin_acr == 'ref':
+            return 'Refined experimental structure', f'refined/{protein.replace("_refined", "")}', ''
+        return '', '', ''
+
+    @staticmethod
+    def enhance_data_with_db_info(temp_data):
+        structure_info = Structure.objects.all().values_list(
+            'pdb_code__index', 'state__slug', 
+            'protein_conformation__protein__family__parent__parent__parent__name', 
+            'protein_conformation__protein__family__parent__name', 
+            'protein_conformation__protein__species__common_name', 
+            Case(
+                When(protein_conformation__protein__accession__isnull=True,
+                    then='protein_conformation__protein__parent__name'),
+                default='protein_conformation__protein__name',
+                output_field=CharField(),
+            ),                                                                      
+            Case(
+                When(protein_conformation__protein__accession__isnull=True,
+                    then='protein_conformation__protein__parent__entry_name'),
+                default='protein_conformation__protein__entry_name',
+                output_field=CharField(),
+            ),                                                                  
+            Case(
+                When(protein_conformation__protein__accession__isnull=True,
+                    then='protein_conformation__protein__parent__accession'),
+                default='protein_conformation__protein__accession',
+                output_field=CharField(),
+            ),
+        )
+
+        structure_dict = {item[0]: item for item in structure_info}
+
+        data = []
+        for entry in temp_data:
+            protein = entry["protein"]
+            structure_values = structure_dict.get(protein, ['N/A']*8)
+            db_class = structure_values[2].split(' ')[1]
+            db_receptor_family = structure_values[3].replace('receptors', '')
+            db_uniprot = structure_values[6].split('_')[0].upper().strip()
+            db_uiphar = structure_values[5].replace('receptor', '').strip()
+
+            data.append({
+                'input_chain': entry['input_chain'],
+                'protein': protein, 'chain': entry["chain"], 'type': entry["origin"], 
+                'TM_score': entry["TM_score"], 'lddt':entry['lddt'] ,'E_value': entry["E_value"], 'link': entry["linking"], 
+                'state': entry["state"] if entry["state"] else structure_values[1], 
+                'clas': db_class, 'rec_fam': db_receptor_family, 'species': structure_values[4], 
+                'uniprot': db_uniprot, 'gtopdb': db_uiphar
+            })
+        return data
+
+    @staticmethod
+    def cleanup_files(file_paths):
+        for file_path in file_paths:
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
+
+class QueuedStructureBlastView(StructureBlastView):
+    MAX_CONCURRENT_RUNS = 2  # Adjust this value as needed
+    semaphore = threading.Semaphore(MAX_CONCURRENT_RUNS)
+    request_queue = queue.Queue()
+
+    @classmethod
+    def process_queue(cls):
+        while True:
+            view_instance, request, response_queue = cls.request_queue.get()
+            with cls.semaphore:
+                result = view_instance.process_request(request)
+            response_queue.put(result)
+            cls.request_queue.task_done()
+
+    @classmethod
+    def start_queue_processor(cls):
+        threading.Thread(target=cls.process_queue, daemon=True).start()
+
+    def process_request(self, request):
+        # This method will be called to process the request
+        return super().post(request)
+
+    def post(self, request):
+        response_queue = queue.Queue()
+        self.request_queue.put((self, request, response_queue))
+
+        def stream_response():
+            yield "Your request is queued. Please wait...\n"
+            result = response_queue.get()
+            yield result.content
+
+        return StreamingHttpResponse(stream_response())
+
+# Start the queue processor when the server starts
+QueuedStructureBlastView.start_queue_processor()
+
+
+import logging
+logger = logging.getLogger(__name__)
+
+class TaskQueue:
+    def __init__(self):
+        self.queue = queue.Queue()
+        self.results = {}
+        self.thread = threading.Thread(target=self.worker, daemon=True)
+        self.thread.start()
+
+    def worker(self):
+        while True:
+            task = self.queue.get()
+            if task is None:
+                break
+            task_id, func, args, kwargs = task
+            try:
+                result = func(*args, **kwargs)
+                self.results[task_id] = ('COMPLETED', result)
+            except Exception as e:
+                logger.error(f"Task {task_id} failed: {str(e)}")
+                self.results[task_id] = ('FAILED', str(e))
+            finally:
+                self.queue.task_done()
+
+    def add_task(self, func, *args, **kwargs):
+        task_id = str(uuid.uuid4())
+        self.results[task_id] = ('PENDING', None)
+        self.queue.put((task_id, func, args, kwargs))
+        return task_id
+
+    def get_result(self, task_id):
+        return self.results.get(task_id, ('UNKNOWN', None))
+
+task_queue = TaskQueue()
+
+class StructureBlastView1(View):
+    template_name = 'structure_blast.html'
+
+    def get(self, request):
+        task_id = request.GET.get('task_id')
+        if task_id:
+            return self.get_result(request)
+        return render(request, self.template_name)
+
+    def post(self, request):
+        try:
+            input_file = request.FILES.get('input_file')
+            if not input_file:
+                return JsonResponse({"error": "No input file provided."}, status=400)
+
+            temp_file_un_path = self.save_temp_file(input_file)
+
+            alignment_method = request.POST.get('alignment_method')
+            structure_method = request.POST.get('structure_type')
+            tm7_h8_value = request.POST.get('tm7_h8')
+            tm7_h8 = tm7_h8_value == 'True'
+
+            temp_file_path, type_db = self.process_input_file(temp_file_un_path, tm7_h8)
+
+            alignment_type = self.get_alignment_type(alignment_method)
+            structure_type = self.get_structure_type(structure_method)
+
+            if alignment_type is None:
+                return JsonResponse({"error": "Invalid alignment method selected."}, status=400)
+
+            fdb = os.path.join(settings.DATA_DIR, 'structure_data', f'{structure_type}{type_db}')
+
+            task_id = task_queue.add_task(
+                self.run_foldseek_and_process,
+                temp_file_path,
+                fdb,
+                alignment_type
+            )
+
+            return JsonResponse({'task_id': task_id, 'status': 'PENDING'})
+        except Exception as e:
+            logger.error(f"Error in post method: {str(e)}")
+            return JsonResponse({"error": str(e)}, status=500)
+        finally:
+            self.cleanup_files([temp_file_un_path, temp_file_path])
+
+    def get_result(self, request):
+        task_id = request.GET.get('task_id')
+        if not task_id:
+            return JsonResponse({'error': 'No task ID provided.'}, status=400)
+        
+        try:
+            status, result = task_queue.get_result(task_id)
+            if status == 'PENDING':
+                response = {'state': status, 'status': 'Task is in the queue.'}
+            elif status == 'COMPLETED':
+                response = {'state': status, 'result': result}
+            elif status == 'FAILED':
+                response = {'state': status, 'status': str(result) if result else 'Unknown error occurred'}
+            else:
+                response = {'state': 'UNKNOWN', 'status': f'Unknown task status: {status}'}
+            return JsonResponse(response)
+        except Exception as e:
+            logger.error(f"Error getting result for task {task_id}: {str(e)}")
+            return JsonResponse({'error': str(e)}, status=500)
+
+    def run_foldseek_and_process(self, temp_file_path, fdb, alignment_type):
+
+        try:
+            result_file_path = self.docker_foldseek(temp_file_path, fdb, alignment_type)
+
+            print('RESULTS')
+            print(result_file_path)
+            if result_file_path:
+                data = self.parse_results(result_file_path)
+                enhanced_data = self.enhance_data_with_db_info(data)
+                return enhanced_data
+            else:
+                raise Exception("Foldseek failed to produce a result file")
+        except Exception as e:
+            print(f"Error in run_foldseek_and_process: {str(e)}")
+            raise
+
+
+    # @staticmethod
+    # def save_temp_file(input_file):
+    #     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdb') as tmp_input_un_file:
+    #         for chunk in input_file.chunks():
+    #             tmp_input_un_file.write(chunk)
+    #         tmp_input_un_file.flush()
+    #         return tmp_input_un_file.name
+        
+    @staticmethod
+    def save_temp_file(file):
+        specific_path = '/Users/vtk842/checking/protwis/test_foldseek/temporary_files'
+        os.makedirs(specific_path, exist_ok=True)
+        
+        file_path = os.path.join(specific_path, file.name)
+        with open(file_path, 'wb+') as destination:
+            for chunk in file.chunks():
+                destination.write(chunk)
+        print('FILE PATH')
+        print(file_path)
+        print(file_path.exists())
+        return file_path
+
+
+
+
+    @staticmethod
+    def process_input_file(temp_file_un_path, tm7_h8):
+        if tm7_h8:
+            temp_file_path = temp_file_un_path
+            type_db = '_1'
+        else:
+            temp_file_path = temp_file_un_path
+            type_db = ''
+        return temp_file_path, type_db
+
+    @staticmethod
+    def get_alignment_type(alignment_method):
+        alignment_type_mapping = {
+            "3Di-align": 0,
+            "TM-align": 1,
+            "3Di+-align": 2
+        }
+        return alignment_type_mapping.get(alignment_method)
+
+    @staticmethod
+    def get_structure_type(structure_method):
+        structure_type_mapping = {
+            "alphafold": 'af_foldseek_db',
+            "refined": 'ref_foldseek_db',
+            "experimental": 'raw'
+        }
+        return structure_type_mapping.get(structure_method)
+
+    @staticmethod
+    def run_foldseek(temp_file_path, fdb, alignment_type):
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_result_file:
+            result_file_path = tmp_result_file.name
+            cmd = [
+                '/Users/vtk842/foldseek/foldseek/bin/foldseek',
+                'easy-search',
+                temp_file_path,
+                fdb,
+                result_file_path, '/tmp',
+                '--alignment-type', str(alignment_type),
+                '--format-output', "query,target,ttmscore,lddt,evalue"
+            ]
+            result = subprocess.run(cmd, capture_output=True)
+            if result.returncode != 0:
+                return None
+            return result_file_path
+        
+
+    def docker_foldseek1(self, temp_file_path, fdb, alignment_type):
+        client = docker.from_env()
+        container_name = 'foldseek_pers'
+
+        try:
+            container = client.containers.get(container_name)
+        except docker.errors.NotFound:
+            return None  # Container not found, handle this error as needed
+
+        # Prepare input file
+        container_input_path = '/app/input.pdb'
+        tar_stream = self.create_tarfile(temp_file_path, arcname=os.path.basename(container_input_path))
+        container.put_archive(path=os.path.dirname(container_input_path), data=tar_stream)
+
+        # Prepare database path
+        container_db_path = '/app/db'
+        db_tar_stream = self.create_tarfile(fdb, arcname=os.path.basename(container_db_path))
+        container.put_archive(path=os.path.dirname(container_db_path), data=db_tar_stream)
+
+        # Prepare output file path
+        container_output_path = '/app/result.txt'
+
+        # Define the command
+        command = [
+            'foldseek', 'easy-search',
+            container_input_path,
+            container_db_path,
+            container_output_path,
+            '/tmp',
+            '--alignment-type', str(alignment_type),
+            '--format-output', "query,target,ttmscore,lddt,evalue"
+        ]
+
+        # Execute the command
+        exec_result = container.exec_run(command)
+
+        if exec_result.exit_code != 0:
+            print(f"Command failed with exit code {exec_result.exit_code}")
+            return None
+
+        # Copy result file from container
+        bits, stat = container.get_archive(container_output_path)
+
+        # Extract the file from the tar stream
+        output_dir = os.path.dirname(temp_file_path)  # Use the same directory as the input file
+        output_filename = 'foldseek_result.txt'
+        output_path = os.path.join(output_dir, output_filename)
+
+        tar_bytes = io.BytesIO()
+        for chunk in bits:
+            tar_bytes.write(chunk)
+
+        self.extract_file_from_tar(tar_bytes, os.path.basename(container_output_path), output_path)
+
+        return output_path
+
+    def docker_foldseek2(self, temp_file_path, fdb, alignment_type):
+        client = docker.from_env()
+        container_name = 'foldseek_pers'
+        run_id = uuid.uuid4()  # Generate a unique ID for this run
+
+        try:
+            container = client.containers.get(container_name)
+        except docker.errors.NotFound:
+            print(f"Container {container_name} not found")
+            return None
+
+        try:
+            # Prepare input file
+            container_input_path = f'/app/input_{run_id}.pdb'
+            with self.create_tarfile(temp_file_path, arcname=os.path.basename(container_input_path)) as tar_stream:
+                container.put_archive(path=os.path.dirname(container_input_path), data=tar_stream)
+
+            # Prepare database path
+            container_db_path = f'/app/db_{run_id}'
+            with self.create_tarfile(fdb, arcname=os.path.basename(container_db_path)) as db_tar_stream:
+                container.put_archive(path=os.path.dirname(container_db_path), data=db_tar_stream)
+
+            # Prepare output file path
+            container_output_path = f'/app/result_{run_id}.txt'
+
+            # Define the command
+            command = [
+                'foldseek', 'easy-search',
+                container_input_path,
+                container_db_path,
+                container_output_path,
+                '/tmp',
+                '--alignment-type', str(alignment_type),
+                '--format-output', "query,target,ttmscore,lddt,evalue"
+            ]
+
+            # Execute the command
+            exec_result = container.exec_run(command)
+
+            if exec_result.exit_code != 0:
+                print(f"Command failed with exit code {exec_result.exit_code}")
+                return None
+
+            # Copy result file from container
+            bits, stat = container.get_archive(container_output_path)
+
+            # Extract the file from the tar stream
+            output_dir = tempfile.mkdtemp()  # Create a new temporary directory
+            output_filename = f'foldseek_result_{run_id}.txt'
+            output_path = os.path.join(output_dir, output_filename)
+
+            with io.BytesIO() as tar_bytes:
+                for chunk in bits:
+                    tar_bytes.write(chunk)
+                self.extract_file_from_tar(tar_bytes, os.path.basename(container_output_path), output_path)
+
+            return output_path
+
+        except Exception as e:
+            print(f"An error occurred: {str(e)}")
+            return None
+
+        finally:
+            # Cleanup
+            try:
+                container.exec_run(f"rm {container_input_path} {container_db_path} {container_output_path}")
+            except Exception as e:
+                print(f"Failed to clean up container files: {str(e)}")
+
+    def docker_foldseek(self, temp_file_path, fdb, alignment_type):
+        client = docker.from_env()
+        container_name = 'foldseek_pers'
+        run_id = uuid.uuid4()
+
+        try:
+            container = client.containers.get(container_name)
+        except docker.errors.NotFound:
+            logger.error(f"Container {container_name} not found")
+            raise Exception(f"Docker container '{container_name}' not found")
+
+        container_input_path = f'/app/input_{run_id}.pdb'
+        container_db_path = f'/app/db_{run_id}'
+        container_output_path = f'/app/result_{run_id}.txt'
+
+        try:
+            # Prepare input file
+            logger.info(f"Creating tar for input file: {temp_file_path}")
+            if not os.path.exists(temp_file_path):
+                raise FileNotFoundError(f"Input file does not exist: {temp_file_path}")
+            
+            with self.create_tarfile(temp_file_path, arcname=os.path.basename(container_input_path)) as tar_stream:
+                logger.info("Putting archive into container")
+                container.put_archive(path=os.path.dirname(container_input_path), data=tar_stream)
+            
+            # Prepare database path
+            logger.info('Preparing database')
+            with self.create_tarfile(fdb, arcname=os.path.basename(container_db_path)) as db_tar_stream:
+                container.put_archive(path=os.path.dirname(container_db_path), data=db_tar_stream)
+
+            # Define the command
+            command = [
+                'foldseek', 'easy-search',
+                container_input_path,
+                container_db_path,
+                container_output_path,
+                '/tmp',
+                '--alignment-type', str(alignment_type),
+                '--format-output', "query,target,ttmscore,lddt,evalue"
+            ]
+
+            # Execute the command
+            logger.info(f"Executing command: {' '.join(command)}")
+            exec_result = container.exec_run(command)
+
+            if exec_result.exit_code != 0:
+                raise Exception(f"Command failed with exit code {exec_result.exit_code}: {exec_result.output}")
+
+            # Copy result file from container
+            bits, stat = container.get_archive(container_output_path)
+
+            # Extract the file from the tar stream
+            output_dir = tempfile.mkdtemp()
+            output_filename = f'foldseek_result_{run_id}.txt'
+            output_path = os.path.join(output_dir, output_filename)
+
+            with io.BytesIO() as tar_bytes:
+                for chunk in bits:
+                    tar_bytes.write(chunk)
+                self.extract_file_from_tar(tar_bytes, os.path.basename(container_output_path), output_path)
+
+            return output_path
+
+        except Exception as e:
+            logger.error(f"An error occurred in docker_foldseek: {str(e)}")
+            raise
+        finally:
+            # Cleanup
+            try:
+                cleanup_command = f"rm {container_input_path} {container_db_path} {container_output_path}"
+                container.exec_run(cleanup_command)
+            except Exception as e:
+                logger.error(f"Failed to clean up container files: {str(e)}")
+
+    def create_tarfile(self, file_path, arcname):
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+            tar.add(file_path, arcname=arcname)
+        tar_stream.seek(0)
+        return tar_stream
+
+    def extract_file_from_tar(self, tar_stream, member_name, output_path):
+        tar_stream.seek(0)
+        with tarfile.open(fileobj=tar_stream, mode='r') as tar:
+            member = tar.getmember(member_name)
+            f = tar.extractfile(member)
+            with open(output_path, 'wb') as out_f:
+                out_f.write(f.read())
+
+    @staticmethod
+    def parse_results(result_file_path):
+        with open(result_file_path, 'r') as file:
+            output_content = file.readlines()
+
+        pdb_code_indices = set()
+        temp_data = []
+
+        for line in output_content:
+            values = line.split('\t')
+            input_split = values[0].rsplit('_', 1)
+            input_chain = input_split[1] if len(input_split) == 2 else 'N/A'
+            protein_info = values[1].split('info')
+            protein, origin_acr, _ = protein_info[0].rsplit('_', 2)
+            pdb_code_indices.add(protein)
+
+            chain = protein_info[1].replace('_', '') if protein_info[1] else 'N/A'
+            origin, linking, state = StructureBlastView.get_protein_origin_info(protein, origin_acr)
+
+            temp_data.append({
+                'input_chain': input_chain, "protein": protein, "chain": chain, "origin": origin, "linking": linking, 
+                "state": state, "TM_score": values[2], "E_value": values[4], "lddt":values[3]
+            })
+
+        return temp_data
+
+    @staticmethod
+    def get_protein_origin_info(protein, origin_acr):
+        if origin_acr == 'raw':
+            return 'Raw Experimental structure', protein, ''
+        elif origin_acr == 'af':
+            protein_data = protein.split('_human_')
+            return 'AF2 model', f'homology_models/{protein}', protein_data[1]
+        elif origin_acr == 'ref':
+            return 'Refined experimental structure', f'refined/{protein.replace("_refined", "")}', ''
+        return '', '', ''
+
+    @staticmethod
+    def enhance_data_with_db_info(temp_data):
+        structure_info = Structure.objects.all().values_list(
+            'pdb_code__index', 'state__slug', 
+            'protein_conformation__protein__family__parent__parent__parent__name', 
+            'protein_conformation__protein__family__parent__name', 
+            'protein_conformation__protein__species__common_name', 
+            Case(
+                When(protein_conformation__protein__accession__isnull=True,
+                    then='protein_conformation__protein__parent__name'),
+                default='protein_conformation__protein__name',
+                output_field=CharField(),
+            ),                                                                      
+            Case(
+                When(protein_conformation__protein__accession__isnull=True,
+                    then='protein_conformation__protein__parent__entry_name'),
+                default='protein_conformation__protein__entry_name',
+                output_field=CharField(),
+            ),                                                                  
+            Case(
+                When(protein_conformation__protein__accession__isnull=True,
+                    then='protein_conformation__protein__parent__accession'),
+                default='protein_conformation__protein__accession',
+                output_field=CharField(),
+            ),
+        )
+
+        structure_dict = {item[0]: item for item in structure_info}
+
+        data = []
+        for entry in temp_data:
+            protein = entry["protein"]
+            structure_values = structure_dict.get(protein, ['N/A']*8)
+            db_class = structure_values[2].split(' ')[1]
+            db_receptor_family = structure_values[3].replace('receptors', '')
+            db_uniprot = structure_values[6].split('_')[0].upper().strip()
+            db_uiphar = structure_values[5].replace('receptor', '').strip()
+
+            data.append({
+                'input_chain': entry['input_chain'],
+                'protein': protein, 'chain': entry["chain"], 'type': entry["origin"], 
+                'TM_score': entry["TM_score"], 'lddt':entry['lddt'] ,'E_value': entry["E_value"], 'link': entry["linking"], 
+                'state': entry["state"] if entry["state"] else structure_values[1], 
+                'clas': db_class, 'rec_fam': db_receptor_family, 'species': structure_values[4], 
+                'uniprot': db_uniprot, 'gtopdb': db_uiphar
+            })
+        return data
+
+    @staticmethod
+    def cleanup_files(file_paths):
+        for file_path in file_paths:
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
