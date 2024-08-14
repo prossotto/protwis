@@ -4,6 +4,7 @@ from protein.models import Protein
 from residue.models import Residue
 from structure.functions import PdbStateIdentifier
 from structure.models import *
+from structure.models import Structure
 
 import Bio.PDB as PDB
 from collections import OrderedDict
@@ -20,8 +21,9 @@ class Command(BaseBuild):
 	def handle(self, *args, **options):
 		try:
 			s = Structure.objects.get(pdb_code__index=options['s'])
-		except:
-			s = StructureModel.objects.get(protein__entry_name=options['s'], state__slug=options['state'])
+		except Exception as e:
+			# s = StructureModel.objects.get(protein__entry_name=options['s'], state__slug=options['state'])
+			print(f' The exception {e} was produced ')
 		if options['gns']:
 			if s.protein_conformation.protein.family.slug.startswith('002') or s.protein_conformation.protein.family.slug.startswith('003'):
 				tm2_gn, tm6_gn, tm3_gn, tm7_gn = '2x41', '6x33', '3x44', '7x51'

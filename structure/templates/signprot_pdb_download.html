@@ -1,0 +1,28 @@
+{% extends "home/base.html" %}
+{% load static %}
+
+
+{% block content %}
+
+<form action="{% url 'download_pdb' %}" method="post">
+    {% csrf_token %}
+    {% for structure in structures %}
+        <h3>{{ structure.pdb_index }}</h3>
+        <div>
+            <input type="checkbox" name="full_pdb" id="full_{{ structure.pdb_index }}" value="{{ structure.pdb_index }}">
+            <label for="full_{{ structure.pdb_index }}">Download Full PDB</label>
+        </div>
+        {% for chain in structure.chains %}
+            <div>
+                <input type="checkbox" name="chains" id="{{ chain.id }}_{{ structure.pdb_index }}" value="{{ chain.id }}">
+                <label for="{{ chain.id }}_{{ structure.pdb_index }}">{{ chain.name }}</label>
+                <!-- Include hidden fields to pass pdb data -->
+                <input type="hidden" name="pdb_data_{{ chain.id }}" value="{{ structure.pdb_data|safe }}">
+            </div>
+        {% endfor %}
+    {% endfor %}
+    <button type="submit">Download Selected</button>
+</form>
+{% endblock %}
+
+

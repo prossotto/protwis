@@ -75,6 +75,7 @@ class GenericNumbering(object):
         extracting sequence and preparing dictionary of residues
         bio.pdb reads pdb in the following cascade: model->chain->residue->atom
         """
+
         for chain in pdb_struct:
             self.residues[chain.id] = {}
             self.pdb_seq[chain.id] = Seq('')
@@ -189,7 +190,6 @@ class GenericNumbering(object):
                             residue["N"].set_bfactor(float(self.residues[chain.id][residue.id[1]].bw))
                     except ValueError:
                         continue
-
         return self.pdb_structure
 
 
@@ -217,6 +217,9 @@ class GenericNumbering(object):
         #blast search goes first, looping through all the chains
         for chain in self.pdb_seq.keys():
             alignments[chain] = self.blast.run(self.pdb_seq[chain])
+
+        print('ALIGNMENTS')
+        print(alignments)
 
         #map the results onto pdb sequence for every sequence pair from blast
         for chain in self.pdb_seq.keys():
@@ -290,12 +293,23 @@ class GenericNumberingFromDB(GenericNumbering):
         Assigns generic numbers based on DB info instead of BLAST search
         Residues get fetched and structure gets parsed upon init
         """
-
         self.residues = {}
         self.pdb_seq = {}
         self.structure = structure_obj
-        self.pdb_structure = pdbdata
+
+        print('starting PARSER')
+        parser = PDBParser(PERMISSIVE=True, QUIET=True)
+        print('Parser defined')
+        pdb_io = StringIO(pdbdata)
+        structure = parser.get_structure('PDB_structure', pdb_io)
+        first_model = next(structure.get_models())
+
+        self.pdb_structure = first_model
+        print('Parser done')
+        # self.pdb_structure = pdbdata
+
         resis = Residue.objects.filter(protein_conformation=structure_obj.protein_conformation, protein_segment__isnull=False).prefetch_related('display_generic_number', 'protein_segment')
+
         self.resis = OrderedDict()
         for r in resis:
             self.resis[r.sequence_number] = r
@@ -321,3 +335,61 @@ class GenericNumberingFromDB(GenericNumbering):
                     self.residues[chain][resn].add_residue_record(db_res)
 
         return self.get_annotated_structure()
+    
+
+class GenericNumberingFromDB1(GenericNumbering):
+
+    def __init__(self, structure_obj, pdbdata):
+        """
+        Assigns generic numbers based on DB info instead of BLAST search
+        Residues get fetched and structure gets parsed upon init
+        """
+        self.residues = {}
+        self.pdb_seq = {}
+        self.structure = structure_obj
+
+        print('starting PARSER')
+        parser = PDBParser(PERMISSIVE=True, QUIET=True)
+        print('Parser defined')
+        pdb_io = StringIO(pdbdata)
+        structure = parser.get_structure('PDB_structure', pdb_io)
+        first_model = next(structure.get_models())
+
+        self.pdb_structure = first_model
+        print('Parser done')
+        # self.pdb_structure = pdbdata
+
+        # try:
+        #     resis = Residue.objects.filter(protein_conformation=structure_obj.protein_conformation, protein_segment__isnull=False).prefetch_related('display_generic_number', 'protein_segment')
+        # except:
+        resis = Residue.objects.filter(protein_conformation=structure_obj.protein.protein_conformation[0], protein_segment__isnull=False).prefetch_related('display_generic_number', 'protein_segment')
+        print('RESIS')
+
+        self.resis = OrderedDict()
+        for r in resis:
+            self.resis[r.sequence_number] = r
+        print(' PARSE_STRUCTURE')
+        self.parse_structure(self.pdb_structure)
+        print('Structure PArsed')
+
+    def assign_generic_numbers(self):
+        #map the results onto pdb sequence from db
+        chain = 'A'
+        for resn in self.residues[chain].keys():
+            if resn in self.residues[chain] and resn in self.resis:
+                db_res = self.resis[resn]
+                if db_res.protein_segment:
+                    segment = db_res.protein_segment.slug
+                    self.residues[chain][resn].add_segment(segment)
+                if db_res.display_generic_number:
+                    num = db_res.display_generic_number.label
+                    bw, gpcrdb = num.split('x')
+                    gpcrdb = "{}.{}".format(bw.split('.')[0], gpcrdb)
+                    self.residues[chain][resn].add_bw_number(bw)
+                    self.residues[chain][resn].add_gpcrdb_number(gpcrdb)
+                    self.residues[chain][resn].add_gpcrdb_number_id(db_res.display_generic_number.id)
+                    self.residues[chain][resn].add_display_number(num)
+                    self.residues[chain][resn].add_residue_record(db_res)
+
+        return self.get_annotated_structure()
+

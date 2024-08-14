@@ -8,6 +8,11 @@ from django.views.decorators.cache import cache_page
 
 urlpatterns = [
     url(r'^$', cache_page(60*60*24)(StructureBrowser.as_view()), name='structure_browser'),
+    # url(r'^foldsearch', StructureBlastView1.as_view(), name='foldsearch'), # ERASE
+    path('structure_blast', StructureBlastView.as_view(), name='structure-blast'),
+    # url(r'^structure_blast/result/<uuid:task_id>/', StructureBlastResultPageView.as_view(), name='structure-blast-result-page'),
+    # url(r'^api/structure_blast/', StructureBlastView.as_view(), name='structure-blast-api'),
+    # url(r'^api/structure_blast/result/<uuid:task_id>/', StructureBlastResultView.as_view(), name='structure-blast-result-api'),
     # url(r'^$', StructureBrowser.as_view(), name='structure_browser'),
     url(r'^g_protein_structure_browser$', cache_page(60*60*24)(EffectorStructureBrowser.as_view(effector='gprot')), name='g_protein_structure_browser'),
     # url(r'^g_protein_structure_browser$', EffectorStructureBrowser.as_view(effector='gprot'), name='g_protein_structure_browser'),

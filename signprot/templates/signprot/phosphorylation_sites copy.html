@@ -1,0 +1,65 @@
+{% extends "home/base.html" %}
+{% load static %}
+
+{% block addon_css %}
+    <link rel="stylesheet" href="{% static 'home/css/jquery.dataTables.min.css' %}" type="text/css"/>
+    <link rel="stylesheet" href="{% static 'home/css/yadcf_bootstrap_version.css' %}" type="text/css"/>
+    <link rel="stylesheet" href="{% static 'home/css/select2.css' %}" type="text/css"/>
+    <link rel="stylesheet" href="{% static 'home/css/signprot-multitabtable.css' %}" type="text/css"/>
+{% endblock %}
+
+{% block content %}
+  <div style='width:100%; display:inline;'>
+    <div class="btn-group" style="padding-left:10px;">
+        
+        <input class="btn btn-default btn-s" type="button" onclick="reset_tab(oTable);" value="Remove filters">
+    </div>
+
+    <div class="btn-group" style="padding-left:10px;">
+      <input class="btn btn-default btn-s" type="button"
+            onclick="GlobalTableToExcel('table', 'phosphorylation sites data', 'ArrestinDB_phosphorylation_sites.xls')"
+            value="Excel (selection)">
+      <a id="dlink" style="display:none;"></a>
+      <div id="excel_table" style="display:none;"></div>
+      <a href="https://files.gpcrdb.org/GPCR-G_protein_couplings.xlsx" class="btn btn-default btn-s" type="button">Excel (underlying datasets)</a>
+    </div>
+  </div>
+
+<!-- tab controls  -->
+<div class="container mt-3">
+    <ul class="nav nav-tabs">
+        {% for header, subs in headers %}
+            <li class="nav-item {% if forloop.first %}active{% endif %}" data-column="{{  header.1|lower }}">
+                <a class="nav-link" data-toggle="tab" href="" onclick="event.preventDefault(); showColumn('{{ header.1|lower }}')">{{ header.0|upper }}</a>
+            </li>
+        {%  endfor %}
+    </ul>
+
+    <!-- Data Table -->
+    <div style='padding-top: 0px; white-space: nowrap; width:100%; overflow-y:hidden; display:inline-block;'>
+        <table class="table compact row-border" id="table" style="display:none; float:left;">
+            <thead>
+                <th>x</th>
+            </thead>
+            <tbody>
+                <td>x</td>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block addon_js %}
+    <script src="{% static 'home/js/jquery.dataTables.min.js' %}"></script>
+    <script src="{% static 'home/js/jquery.dataTables.yadcf.js' %}"></script>
+    <script src="{% static 'home/js/select2.js' %}"></script>
+    <script src="{% static 'home/js/phosphorylation_sites.js' %}"></script>
+    <script src="{% static 'home/js/signprot-multitabtable.js' %}"></script>
+    <script src="{% static 'home/js/xlsx.full.min.js' %}"></script>  
+    <script src="{% static 'home/js/gpcrdb.js' %}"></script>
+    <script src="{% static 'home/js/arrestin_coupling.js' %}"></script> -->
+
+
+{% endblock %}
