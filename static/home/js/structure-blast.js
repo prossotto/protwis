@@ -1,0 +1,108 @@
+$(document).ready(function() {
+    console.log('Document ready');
+
+    const $form = $('#structure-blast-form');
+    const $spinner = $('#loading-spinner');
+    const $results = $('#results');
+    const $fileInput = $('#input_pdb');
+
+    if (!$form.length) {
+        console.error('Form not found');
+        return;
+    }
+
+    $form.on('submit', function(e) {
+        console.log('Form submitted');
+        e.preventDefault();
+
+        $spinner.show();
+        $results.hide();
+
+        if ($.fn.DataTable.isDataTable('#results_table')) {
+            $('#results_table').DataTable().destroy();
+        }
+
+        $.ajax({
+            url: $form.attr('action'),
+            type: $form.attr('method'),
+            data: new FormData(this),
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                console.log('AJAX request successful');
+                $spinner.hide();
+                
+                var $parsedHtml = $(response);
+                var $newResultsTable = $parsedHtml.find('#results_table');
+                
+                if ($newResultsTable.length) {
+                    $results.html($newResultsTable).show();
+                    initializeDataTable();
+                    $fileInput.val('');
+                } else {
+                    $results.html('<p>No results found.</p>').show();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX request failed:', status, error);
+                $spinner.hide();
+                $results.html('<p>An error occurred. Please try again.</p>').show();
+            }
+        });
+    });
+
+    function initializeDataTable() {
+        console.log('Initializing DataTable');
+        if ($('#results_table').length) {
+            try {
+                var table = $('#results_table').DataTable({
+                    "order": [[10, "desc"], [11, "asc"], [12, "asc"]],
+                    "pageLength": 20,
+                    'lengthChange': false,
+                    "columnDefs": [{
+                        "className": "text-left",
+                        "targets": [9, 10]
+                    }]
+                });
+
+                yadcf.init(table, [
+                    { column_number: 1, filter_type: "multi_select", select_type: "select2", column_data_type: "html", html_data_type: "text", filter_match_mode : "exact" },
+                    { column_number: 2, filter_type: "multi_select", select_type: "select2", column_data_type: "html", html_data_type: "text", filter_match_mode : "exact" },
+                    { column_number: 3, filter_type: "multi_select", select_type: "select2" },
+                    { column_number: 4, filter_type: "multi_select", select_type: "select2", filter_match_mode : "exact" },
+                    { column_number: 5, filter_type: "multi_select", select_type: "select2", filter_match_mode : "exact" },
+                    { column_number: 6, filter_type: "multi_select", select_type: "select2" },
+                    { column_number: 7, filter_type: "multi_select", select_type: "select2" },
+                    { column_number: 8, filter_type: "multi_select", select_type: "select2" },
+                    { column_number: 9, filter_type: "multi_select", select_type: "select2" },
+                    { column_number: 10, filter_type: "range_number" },
+                    { column_number: 11, filter_type: "range_number" },
+                    { column_number: 12, filter_type: "range_number" },
+                ]);
+
+                console.log('DataTable initialized successfully');
+            } catch (error) {
+                console.error('Error initializing DataTable:', error);
+            }
+        } else {
+            console.log('Results table not found');
+        }
+    }
+
+    if ($.fn.dataTable.isDataTable('#results_table')) {
+        $('#results_table').DataTable().destroy();
+    }
+    
+    $('#results_table').DataTable({
+        "scrollX": true,
+    });
+
+    $('.tooltip-wrapper').each(function() {
+        var $trigger = $(this).find('.tooltip-trigger');
+        var titleText = $trigger.attr('title');
+        $trigger.removeAttr('title');
+        $(this).find('.tooltiptext').text(titleText);
+    });
+
+});
+

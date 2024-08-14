@@ -321,7 +321,8 @@ class ServeModelStatistics(TemplateView):
                 "target_structure__protein_conformation__protein__parent",
                 "target_structure__protein_conformation__protein__parent__family")
         except StructureModelRMSD.DoesNotExist as e:
-            print(e)
+            # print(e)
+            pass
 
         return context
 
@@ -4002,6 +4003,7 @@ class StructureBlastView(View):
         """
         Execute the Foldseek tool with the given parameters.
         """
+
         if not self.validate_structure_file(temp_file_path):
             return None, "Invalid structure file: No recognizable protein structure data found"
 
@@ -4032,7 +4034,7 @@ class StructureBlastView(View):
 
             command = [
                 'sh', '-c',
-                f'mkdir -p /db && {link_command_str} && foldseek easy-search /input/{input_file_name} /db /output/result.txt /tmp --alignment-type 2 --format-output "query,target,ttmscore,lddt,evalue"'
+                f'mkdir -p /db && {link_command_str} && foldseek easy-search /input/{input_file_name} /db /output/result.txt /tmp --alignment-type {alignment_type} --format-output "query,target,ttmscore,lddt,evalue"'
             ]
 
             try:
@@ -4050,6 +4052,8 @@ class StructureBlastView(View):
                     remove=False,
                     detach=True
                 )
+
+                # print('CONTAINER SET')
 
                 result = container.wait()
 
@@ -4071,13 +4075,22 @@ class StructureBlastView(View):
                 return final_result_path, None
 
             except Exception as e:
-                container.remove(force=True)
+                # If an exception occurs, try to remove the container by its name
+                try:
+                    container_to_remove = client.containers.get(container_name)
+                    container_to_remove.remove(force=True)
+                except Exception as inner_e:
+                    # print(f"Error removing container by name: {str(inner_e)}")
+                    pass
                 return None, f"An error occurred during Foldseek execution: {str(e)}"
+
             finally:
                 try:
-                    container.remove(force=True)
+                    container_to_remove = client.containers.get(container_name)
+                    container_to_remove.remove(force=True)
                 except Exception as e:
-                    print(f"Error removing container: {str(e)}")
+                    # print(f"Error removing container: {str(e)}")
+                    pass
 
     def parse_and_enhance_results(self, result_file_path):
         """
@@ -4199,12 +4212,14 @@ class StructureBlastView(View):
                 try:
                     os.remove(resource)
                 except OSError as e:
-                    print(f"Error deleting file {resource}: {e}")
+                    # print(f"Error deleting file {resource}: {e}")
+                    pass
             elif os.path.isdir(resource):
                 try:
                     shutil.rmtree(resource, ignore_errors=True)
                 except OSError as e:
-                    print(f"Error deleting directory {resource}: {e}")
+                    # print(f"Error deleting directory {resource}: {e}")
+                    pass
 
     def signal_handler(self, sig, frame):
         """
