@@ -2,7 +2,7 @@ from django.shortcuts import render
 from django.conf import settings
 from django.views.generic import TemplateView, View
 from django.http import HttpResponse, HttpResponseRedirect
-from django.db.models import Count, Q, Prefetch, TextField, Avg
+from django.db.models import Count, Q, Prefetch, TextField, Avg, Case, When, CharField
 from django.db.models.functions import Concat
 from django import forms
 
@@ -52,6 +52,18 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 import smtplib
+
+# Imports for Structure_Blast
+import tempfile
+import uuid
+import docker
+import threading
+from functools import wraps
+from django.utils.decorators import method_decorator
+import shutil
+import signal
+from contextlib import contextmanager
+
 
 class_dict = {'001':'A','002':'B1','003':'B2','004':'C','005':'D1','006':'F','007':'T','008':'O'}
 
@@ -3814,3 +3826,400 @@ def RenderTrees(request):
 #   response['Content-Disposition'] = 'attachment; filename="{}"'.format(file)
 #   response.write(out_stream)
 #   return response
+
+
+# SEMAPHORE WRAPPER
+#-------------------
+shared_semaphore = threading.Semaphore(100)
+
+def semaphore_view(semaphore, timeout=5):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped_view(request, *args, **kwargs):
+            # Try to acquire the semaphore
+            acquired = semaphore.acquire(timeout=timeout)
+            
+            if acquired:
+                try:
+                    # Call the Structure_blast view
+                    response = view_func(request, *args, **kwargs)
+                    return response
+                finally:
+                    # Always release the semaphore after the view is done
+                    semaphore.release()
+            else:
+                # If the semaphore couldn't be acquired, return an error response
+                return render(request, 'error_503.html', status=503)
+        
+        return wrapped_view
+    return decorator
+
+
+# Structure Blast
+#----------------
+@method_decorator(semaphore_view(shared_semaphore, timeout=5), name='dispatch')
+class StructureBlastView(View):
+    """
+    A Django view for handling structure blast operations using Foldseek.
+    """
+    template_name = 'structure_blast.html'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.structure_methods = []
+        self.cleanup_resources = []
+
+    def get(self, request):
+        """
+        Handle GET requests.
+        """
+        return render(request, self.template_name)
+
+    def post(self, request):
+        """
+        Handle POST requests for uploading and processing a structure file.
+        """
+        try:
+            input_file = request.FILES.get('input_file')
+            if not input_file:
+                return self.render_error(request, "Please provide an input file.")
+
+            allowed_extensions = ['.pdb', '.cif', '.mmcif']
+            file_extension = os.path.splitext(input_file.name)[1].lower()
+            if file_extension not in allowed_extensions:
+                return self.render_error(request, f"Unsupported file format. Allowed extensions are: {', '.join(allowed_extensions)}")
+
+            with self.manage_temp_file(input_file, file_extension) as temp_file_path:
+                if not self.validate_structure_file(temp_file_path):
+                    return self.render_error(request, "Invalid structure file: No recognizable protein structure data found")
+
+                self.structure_methods = request.POST.getlist('structure_type')
+                if not self.structure_methods:
+                    return self.render_error(request, "Please select at least one structure type.")
+                
+                self.structure_type = [self.get_structure_type(method) for method in self.structure_methods]
+
+                alignment_method = request.POST.get('alignment_method')
+                tm7_h8 = request.POST.get('tm7_h8') == 'True'
+
+                alignment_type = self.get_alignment_type(alignment_method)
+                if alignment_type is None:
+                    return self.render_error(request, "Invalid alignment method selected. Please try again.")
+
+                fdb = self.get_combined_fdb(tm7_h8)
+
+                result_file_path, error_message = self.run_foldseek(temp_file_path, fdb, alignment_type)
+                if error_message:
+                    return self.render_error(request, error_message)
+
+                if not result_file_path:
+                    return self.render_error(request, "An error occurred while processing your request. Please try again later.")
+
+                data = self.parse_and_enhance_results(result_file_path)
+                return render(request, self.template_name, {'data': data})
+
+        except Exception as e:
+            return self.render_error(request, "An unexpected error occurred. Please try again later.")
+
+    def get_combined_fdb(self, tm7_h8):
+        """
+        Get the path to the combined symbolic link database based on selected structure types.
+        """
+        db_suffix = "_trim" if tm7_h8 else ""
+
+        db_paths = {
+            "af_foldseek_db": os.path.join(settings.DATA_DIR, 'structure_data', f'af_foldseek_db{db_suffix}'),
+            "ref_foldseek_db": os.path.join(settings.DATA_DIR, 'structure_data', f'ref_foldseek_db{db_suffix}'),
+            "raw_foldseek_db": os.path.join(settings.DATA_DIR, 'structure_data', f'raw_foldseek_db{db_suffix}'),
+        }
+
+        return db_paths
+
+    def render_error(self, request, message):
+        """
+        Render the template with an error message.
+        """
+        return render(request, self.template_name, {'error_message': message})
+
+    @contextmanager
+    def manage_temp_file(self, input_file, file_extension):
+        """
+        Manage a temporary file using a context manager.
+        """
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
+        self.cleanup_resources.append(temp_file.name)
+        try:
+            for chunk in input_file.chunks():
+                temp_file.write(chunk)
+            temp_file.close()
+            yield temp_file.name
+        finally:
+            if os.path.isfile(temp_file.name):
+                os.remove(temp_file.name)
+
+    @contextmanager
+    def manage_temp_dir(self):
+        """
+        Manage a temporary directory using a context manager.
+        """
+        temp_dir = tempfile.mkdtemp()
+        self.cleanup_resources.append(temp_dir)
+        try:
+            yield temp_dir
+        finally:
+            if os.path.isdir(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def get_alignment_type(alignment_method):
+        """
+        Get the alignment type code based on the method name.
+        """
+        return {"3Di-align": 0, "TM-align": 1, "3Di+-align": 2}.get(alignment_method)
+
+    @staticmethod
+    def get_structure_type(structure_method):
+        """
+        Get the structure type directory name based on the method name.
+        """
+        return {"alphafold": 'af_foldseek_db', "refined": 'ref_foldseek_db', "experimental": 'raw_foldseek_db'}.get(structure_method)
+
+    def validate_structure_file(self, file_path):
+        """
+        Perform basic validation of the structure file.
+        """
+        valid_keywords = ['ATOM', 'HETATM', '_atom_site.', 'loop_']
+        structure_count = 0
+        with open(file_path, 'r') as f:
+            for line in f:
+                if any(keyword in line for keyword in valid_keywords):
+                    structure_count += 1
+                if structure_count > 10:  # We've found enough evidence of structure data
+                    return True
+        return False
+
+    def run_foldseek(self, temp_file_path, fdb, alignment_type):
+        """
+        Execute the Foldseek tool with the given parameters.
+        """
+        if not self.validate_structure_file(temp_file_path):
+            return None, "Invalid structure file: No recognizable protein structure data found"
+
+        allowed_extensions = ['.pdb', '.cif', '.mmcif']
+        file_extension = os.path.splitext(temp_file_path)[1].lower()
+        if file_extension not in allowed_extensions:
+            return None, f"Unsupported file format. Allowed formats are: {', '.join(allowed_extensions)}"
+
+        client = docker.from_env()
+        container_name = f'foldseek_run_{uuid.uuid4()}'
+
+        with self.manage_temp_dir() as temp_dir:
+            input_dir = os.path.join(temp_dir, 'input')
+            output_dir = os.path.join(temp_dir, 'output')
+
+            for dir_path in [input_dir, output_dir]:
+                os.makedirs(dir_path)
+
+            input_file_name = os.path.basename(temp_file_path)
+            input_file = os.path.join(input_dir, input_file_name)
+            shutil.copy(temp_file_path, input_file)
+
+            link_commands = []
+            for db_name in self.structure_type:
+                link_commands.append(f"find /{db_name} -maxdepth 1 -exec ln -s {{}} /db/ \\;")
+
+            link_command_str = " && ".join(link_commands)
+
+            command = [
+                'sh', '-c',
+                f'mkdir -p /db && {link_command_str} && foldseek easy-search /input/{input_file_name} /db /output/result.txt /tmp --alignment-type 2 --format-output "query,target,ttmscore,lddt,evalue"'
+            ]
+
+            try:
+                container = client.containers.run(
+                    'foldseek:latest',
+                    command=command,
+                    name=container_name,
+                    volumes={
+                        input_dir: {'bind': '/input', 'mode': 'ro'},
+                        fdb['af_foldseek_db']: {'bind': '/af_foldseek_db', 'mode': 'ro'},
+                        fdb['ref_foldseek_db']: {'bind': '/ref_foldseek_db', 'mode': 'ro'},
+                        fdb['raw_foldseek_db']: {'bind': '/raw_foldseek_db', 'mode': 'ro'},
+                        output_dir: {'bind': '/output', 'mode': 'rw'},
+                    },
+                    remove=False,
+                    detach=True
+                )
+
+                result = container.wait()
+
+                logs = container.logs().decode('utf-8')
+                if result['StatusCode'] != 0:
+                    return None, f"Foldseek execution failed: {logs}"
+
+                result_file = os.path.join(output_dir, 'result.txt')
+                if not os.path.exists(result_file):
+                    return None, "Foldseek did not produce any results"
+
+                if os.path.getsize(result_file) == 0:
+                    return None, "No structures found in the input file"
+
+                final_result_path = tempfile.mktemp(suffix='.txt', prefix='foldseek_result_')
+                self.cleanup_resources.append(final_result_path)
+                shutil.copy(result_file, final_result_path)
+
+                return final_result_path, None
+
+            except Exception as e:
+                container.remove(force=True)
+                return None, f"An error occurred during Foldseek execution: {str(e)}"
+            finally:
+                try:
+                    container.remove(force=True)
+                except Exception as e:
+                    print(f"Error removing container: {str(e)}")
+
+    def parse_and_enhance_results(self, result_file_path):
+        """
+        Parse the result file and enhance it with additional database information.
+        """
+        with open(result_file_path, 'r') as file:
+            output_content = file.readlines()
+
+        temp_data = []
+        for line in output_content:
+            values = line.split('\t')
+            input_split = values[0].rsplit('_', 1)
+            input_chain = input_split[1] if len(input_split) == 2 else 'N/A'
+            protein_info = values[1].split('info')
+            protein, origin_acr, _ = protein_info[0].rsplit('_', 2)
+            chain = protein_info[1].replace('_', '') if protein_info[1] != '' else '-'
+            origin, linking, state = self.get_protein_origin_info(protein, origin_acr)
+            temp_data.append({
+                'input_chain': input_chain, "protein": protein, "chain": chain, "origin": origin, "linking": linking, 
+                "state": state, "TM_score": values[2], "E_value": values[4], "lddt": values[3]
+            })
+
+        structure_info = self.get_structure_info()
+        return self.enhance_data_with_db_info(temp_data, structure_info)
+
+    @staticmethod
+    def get_protein_origin_info(protein, origin_acr):
+        """
+        Get protein origin information based on the origin acronym.
+        """
+        if origin_acr == 'raw':
+            return 'Raw Experimental structure', protein, ''
+        
+        elif origin_acr == 'af':
+            protein_data = protein.split('_human_')
+            return 'AF2 model', f'homology_models/{protein}', protein_data[1]
+        elif origin_acr == 'ref':
+            return 'Refined experimental structure', f'refined/{protein.replace("_refined", "")}', ''
+        return '', '', ''
+
+    def get_structure_info(self):
+        """
+        Retrieve structure information from the database for all selected structure types.
+        """
+        structures_info = {}
+
+        if 'af_foldseek_db' in self.structure_type:
+            af_structures = StructureModel.objects.filter(main_template__isnull=True).values_list(
+                'protein__entry_name', 'state__slug', 
+                'protein__family__parent__parent__parent__name',  # Class
+                'protein__family__parent__name',  # Family
+                'protein__species__common_name', 
+                'protein__name',
+                'protein__entry_name', 
+                'protein__accession',
+            )
+            
+            structures_info.update({f'{item[0]}_{item[1]}': item for item in af_structures})
+
+        if 'raw_foldseek_db' in self.structure_type or 'ref_foldseek_db' in self.structure_type:
+            exp_structures_info = Structure.objects.all().values_list(
+                'pdb_code__index', 'state__slug', 
+                'protein_conformation__protein__family__parent__parent__parent__name', # Class
+                'protein_conformation__protein__family__parent__name', # Family
+                'protein_conformation__protein__species__common_name', 
+                Case(
+                    When(protein_conformation__protein__accession__isnull=True,
+                        then='protein_conformation__protein__parent__name'),
+                    default='protein_conformation__protein__name',
+                    output_field=CharField(),
+                ),                                                                      
+                Case(
+                    When(protein_conformation__protein__accession__isnull=True,
+                        then='protein_conformation__protein__parent__entry_name'),
+                    default='protein_conformation__protein__entry_name',
+                    output_field=CharField(),
+                ),                                                                  
+                Case(
+                    When(protein_conformation__protein__accession__isnull=True,
+                        then='protein_conformation__protein__parent__accession'),
+                    default='protein_conformation__protein__accession',
+                    output_field=CharField(),
+                ),
+            )
+            structures_info.update({item[0]: item for item in exp_structures_info})
+
+        return structures_info
+
+    @staticmethod
+    def enhance_data_with_db_info(temp_data, structures_info):
+        """
+        Enhance the parsed result data with additional information from the database.
+        """
+        data = []
+        for entry in temp_data:
+            protein = entry["protein"]
+            structure_values = structures_info.get(protein)
+            data.append({
+                'input_chain': entry['input_chain'].strip(),
+                'protein': protein, 'chain': entry["chain"].strip(), 'type': entry["origin"].strip(), 
+                'TM_score': entry["TM_score"], 'lddt': entry['lddt'], 'E_value': entry["E_value"], 'link': entry["linking"], 
+                'state': entry["state"] or structure_values[1], 
+                'clas': structure_values[2].split(' ')[1].strip(),
+                'rec_fam': structure_values[3].replace('receptors', '').strip(),
+                'species': structure_values[4].strip(), 
+                'uniprot': structure_values[6].split('_')[0].upper().strip(),
+                'entry_name': structure_values[6],
+                'gtopdb': structure_values[5].replace('receptor', '').replace('-adrenoceptor', '').strip(),
+                'accession': structure_values[7],
+            })
+        return data
+
+    def cleanup_resources(self):
+        """
+        Clean up resources managed during the process.
+        """
+        for resource in self.cleanup_resources:
+            if os.path.isfile(resource):
+                try:
+                    os.remove(resource)
+                except OSError as e:
+                    print(f"Error deleting file {resource}: {e}")
+            elif os.path.isdir(resource):
+                try:
+                    shutil.rmtree(resource, ignore_errors=True)
+                except OSError as e:
+                    print(f"Error deleting directory {resource}: {e}")
+
+    def signal_handler(self, sig, frame):
+        """
+        Handle termination signals to ensure cleanup before exiting.
+        """
+        self.cleanup_resources()
+        sys.exit(0)
+
+    def __enter__(self):
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGINT, self.signal_handler)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.cleanup_resources()
+
+
+

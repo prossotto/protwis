@@ -1,0 +1,635 @@
+{% extends "home/base.html" %}
+{% load static %}
+
+{% block addon_css %}
+<link rel="stylesheet" href="{% static 'home/css/jquery.dataTables.min.css' %}" type="text/css" />
+<link rel="stylesheet" href="{% static 'home/css/construct_browser.css' %}" type="text/css" />
+<link rel="stylesheet" href="{% static 'home/css/yadcf_bootstrap_version.css' %}" type="text/css" />
+<link rel="stylesheet" href="{% static 'home/css/select2.css' %}" type="text/css" />
+<link rel="stylesheet" href="{% static 'home/css/structure_browser.css' %}" type="text/css" />
+<link href="{% static 'home/css/construct_alignment.css' %}" rel="stylesheet">
+<link href="{% static 'home/css/sequenceviewer.css' %}" rel="stylesheet">
+<link href="{% static 'home/css/modal.css' %}" rel="stylesheet">
+<link rel="stylesheet" type="text/css" href="{% static 'home/css/jquery.powertip.css' %}" />
+
+{% endblock %}
+
+{% block content %}
+<title>Structure Blast</title>
+<style>
+    label {
+        font-weight: bold;
+        margin-right: 10px;
+    }
+
+    body {
+        font-family: Arial, sans-serif;
+        /* background-color: #f4f4f9; */
+        background-color: white;
+        margin: 0;
+        padding: 20px;
+    }
+
+    h1 {
+        text-align: center;
+        color: #333;
+        margin-bottom: 20px;
+        font-size: 2em; /* Adjust the font size as needed */
+        letter-spacing: -0.05em; /* Adjust letter spacing to fit the text */
+        white-space: nowrap; /* Ensure the text does not wrap to the next line */
+        overflow: hidden;
+        text-overflow: ellipsis; /* Add ellipsis if the text is too long */
+    }
+
+    form {
+        background: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        max-width: 1000px;
+        margin: 0 auto;
+    }
+
+    .flex-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: nowrap;
+        gap: 20px;
+        padding-bottom: 2rem;
+    }
+
+    .section {
+        flex: 1;
+        min-width: 200px;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .section label {
+        font-weight: bold;
+        color: #555;
+        display: block;
+        margin-bottom: 10px;
+    }
+
+    .section .row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .section .row input {
+        margin-right: 10px;
+    }
+
+    .section .row label {
+        margin: 0;
+    }
+
+    input[type="file"] {
+        display: block;
+        margin-bottom: 20px;
+    }
+
+    button {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+        background-color: #0056b3;
+    }
+
+    .file-upload-section {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+
+    /* TOOL TIP */
+
+    .tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: pointer;
+    }
+
+    .tooltip .tooltiptext {
+        visibility: hidden;
+        background-color: #ffffff;
+        color: #333;
+        text-align: left;
+        border-radius: 8px;
+        padding: 15px;
+        position: absolute;
+        z-index: 1;
+        bottom: 150%; /* Position the tooltip above the icon */
+        left: 50%;
+        transform: translateX(-50%); /* Center the tooltip */
+        box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.1); /* Softer shadow */
+        border: 1px solid #ddd;
+        max-width: 300px; /* Adjust the max width as needed */
+        white-space: normal; /* Allow the text to wrap */
+    }
+
+    .tooltip:hover .tooltiptext {
+        visibility: visible;
+    }
+
+/* ANOTHER TOOL-TIP */
+
+    .tooltip-wrapper {
+        position: relative;
+        display: inline-block;
+        cursor: pointer;
+    }
+
+    .tooltip-trigger {
+        display: inline-block;
+    }
+
+
+
+    .tooltiptext {
+        visibility: hidden;
+        background-color: #ffffff;
+        color: #333;
+        text-align: left;
+        border-radius: 8px;
+        padding: 15px;
+        position: absolute;
+        z-index: 1;
+        top: 100%;
+        left: 20%;
+        transform: translateX(-50%);
+        box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.1);
+        border: 1px solid #ddd;
+        min-width: 200px;
+        max-width: 350px;
+        width:max-content;
+        white-space: normal;
+    }
+
+    .tooltip-wrapper:hover .tooltiptext {
+        visibility: visible;
+    }
+
+/* LOADING */
+
+    .spinner {  
+    border: 4px solid rgba(0, 0, 0, 0.1);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border-left-color: #007bff;
+    animation: spin 1s ease infinite;
+    margin: 0 auto;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    #loading-spinner {
+        text-align: center;
+        margin-top: 20px;
+        font-family: Arial, sans-serif;
+        color: #333;
+    }
+
+/* Data Table */
+
+    #results {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        margin-top: 20px;
+    }
+
+    #results_table {
+        width: 100%;
+        max-width: 1200px; /* Adjust this value based on your preference */
+        margin: 0 auto;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 2000px) {
+        #results_table {
+            max-width: 100%;
+        }
+    }
+    .dataTables_wrapper {
+        width: 100%;
+        margin: 0 auto;
+        overflow-x: auto;
+    }
+
+</style>
+
+<h1>Structure BLAST uses Foldseek 
+    <a href="https://www.nature.com/articles/s41587-023-01773-0#citeas"> (Ref) </a> 
+    to query a pdb file to get a list 
+    <a href="structure">structures</a>/<a href="structure/homology_models">models</a> 
+    with the highest structural similarity. 
+    <br> GPCRdb provides  <a href="structure">structures</a> and <a href="structure/homology_models">models</a>  
+</h1>
+
+<form method="post" enctype="multipart/form-data" id="structure-blast-form">
+    {% csrf_token %}
+    <div class="flex-container">
+        <div class="file-upload-section">
+            <label for="input_pdb">Upload a pdb file (query):
+                <input type="file" id="input_pdb" name="input_file" required>
+            </label>
+            <div>
+                <input type="hidden" name="tm7_h8" value="False">
+                <input type="checkbox" id="tm7_h8" name="tm7_h8" value="True">
+                <label for="tm7_h8">By 7TM and H8</label>
+            </div>
+            <!-- <div class="row">
+                <input type="radio" id="local_machine" name="input_source" value="local_machine" required>
+                <label for="local_machine">Local Machine</label>
+            </div>
+            <div class="row">
+                <input type="radio" id="pdb" name="input_source" value="pdb" required>
+                <label for="pdb">Protein Data Bank</label>
+            </div> -->
+        </div>
+
+        <!-- <div class="section">
+            <label>Select a method:</label>
+            <div class="row">
+                <input type="radio" id="3d_align" name="alignment_method" value="3Di-align" required checked>
+                <label for="3d_align">3Di-align</label>
+            </div>
+            <div class="row">
+                <input type="radio" id="3d_plus_align" name="alignment_method" value="3Di+-align" required>
+                <label for="3d_plus_align">3Di+-align</label>
+            </div>
+            <div class="row">
+                <input type="radio" id="tm_align" name="alignment_method" value="TM-align" required>
+                <label for="tm_align">TM-align (slow)</label>
+            </div>
+        </div> -->
+
+
+  
+
+        <div class="section">
+            <label>Select a method:</label>
+            <div class="row">
+                <input type="radio" id="3d_align" name="alignment_method" value="3Di-align" required>
+                <label for="3d_align">3Di-align (fastest)
+                    <div class="tooltip-wrapper">
+                        <span class="glyphicon glyphicon-info-sign tooltip-trigger" 
+                            data-toggle="tooltip" 
+                            data-placement="bottom">
+                        </span>
+                        <div class="tooltiptext">Fastest (seconds), high accuracy. Structure alignment.</div>
+                    </div>
+                </label>
+            </div>
+            <div class="row">
+                <input type="radio" id="3d_plus_align" name="alignment_method" value="3Di+-align" required checked>
+                <label for="3d_plus_align">3Di+AA-align (fast)
+                    <div class="tooltip-wrapper">
+                        <span class="glyphicon glyphicon-info-sign tooltip-trigger" 
+                            data-toggle="tooltip" 
+                            data-placement="bottom">
+                        </span>
+                        <div class="tooltiptext">Fast (seconds), high accuracy. Structure plus amino acid alignment.</div>
+                    </div>
+                </label>
+            </div>
+            <div class="row">
+                <input type="radio" id="tm_align" name="alignment_method" value="TM-align" required>
+                <label for="tm_align">TM-align (slow)
+                    <div class="tooltip-wrapper">
+                        <span class="glyphicon glyphicon-info-sign tooltip-trigger" 
+                            data-toggle="tooltip" 
+                            data-placement="bottom"> 
+                        </span>
+                        <div class="tooltiptext">High accuracy with moderate speed; good for detailed global alignments.</div>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+
+
+        <div class="section">
+            <label>Choose database(s):</label>
+            <div class="row">
+                <input type="checkbox" name="structure_type" id="alphafold" value="alphafold">
+                <label for="alphafold">Alphafold models</label>
+            </div>
+            <div class="row">
+                <input type="checkbox" name="structure_type" id="refined" value="refined">
+                <label for="refined">Refined experimental structures</label>
+            </div>
+            <div class="row">
+                <input type="checkbox" name="structure_type" id="experimental" value="experimental" checked>
+                <label for="experimental">Raw experimental structures</label>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit">Submit</button>
+</form>
+
+<!-- LOADER SECTION -->
+<div id="loading-spinner" style="display: none;">
+    <div class="spinner"></div>
+    <p>Processing your request, please wait...</p>
+</div>
+
+<div id="results">
+    {% if data %}
+    <table id="results_table" class="display">
+        <thead>
+            <tr>
+                <th></th>  <!--For Icon -->
+                <th>Uniprot</th>
+                <th>IUPHAR</th>
+                <th>Target Chain</th>
+                <th>Input Chain</th>
+                <th>State</th>
+                <th>Class</th>
+                <th>Family</th>
+                <th>Species</th>
+                <th>Type</th>
+                <th>TM Score</th>
+                <th>LDDT Score</th>
+                <th>E-value</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in data %}
+            <tr>
+                <td>
+                    
+                    <a href="{{ row.link }}" target="_blank">
+                        <img width="14px" height="20px" class="model-link" src="/static/home/images/model-surface.png">
+                    </a>
+                </td>
+
+                <!-- Uniprot -->
+                <td>
+                    <a href="http://www.uniprot.org/uniprot/{{ row.accession }}" target="_blank">{{ row.uniprot }}</a>
+                </td>
+
+                <!-- UIPHAR name -->
+                <td>
+                    <a href="/protein/{{ row.entry_name }}" target="_blank">{{ row.gtopdb|safe }}</a>
+                </td>
+
+                <!-- CHAIN -->
+                <td>{{ row.chain }}</td>
+
+                <!-- input chain-->
+                <td>  {{  row.input_chain }} </td>
+
+                <!-- STATE -->
+                <td>{{ row.state }}</td>
+
+                <!-- Class -->
+                 <td>{{ row.clas }}</td>
+
+                 <!-- Family -->
+                  <td> {{  row.rec_fam }} </td>
+
+                 <!-- Species -->
+                  <td>{{ row.species }}</td>
+
+                <!-- TYPE -->
+                <td>{{ row.type }}</td>
+                <td>{{ row.TM_score }}</td>
+                <td>   {{  row.lddt }} </td>
+                <td>{{ row.E_value }}</td>
+
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% elif error_message %}
+    <p>{{ error_message }}</p>
+    {% endif %}
+</div>
+
+
+
+<script>
+$(document).ready(function() {
+    console.log('Document ready');
+
+    const $form = $('#structure-blast-form');
+    const $spinner = $('#loading-spinner');
+    const $results = $('#results');
+    const $fileInput = $('#input_pdb');
+
+    if (!$form.length) {
+        console.error('Form not found');
+        return;
+    }
+
+    $form.on('submit', function(e) {
+        console.log('Form submitted');
+        e.preventDefault();
+
+        $spinner.show();
+        $results.hide();
+
+        // Destroy existing DataTable if it exists
+        if ($.fn.DataTable.isDataTable('#results_table')) {
+            $('#results_table').DataTable().destroy();
+        }
+
+        $.ajax({
+            url: $form.attr('action'),
+            type: $form.attr('method'),
+            data: new FormData(this),
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                console.log('AJAX request successful');
+                $spinner.hide();
+                
+                // Parse the HTML response
+                var $parsedHtml = $(response);
+                var $newResultsTable = $parsedHtml.find('#results_table');
+                
+                if ($newResultsTable.length) {
+                    $results.html($newResultsTable).show();
+                    initializeDataTable();
+                    
+                    // Clear the file input
+                    $fileInput.val('');
+                } else {
+                    $results.html('<p>No results found.</p>').show();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX request failed:', status, error);
+                $spinner.hide();
+                $results.html('<p>An error occurred. Please try again.</p>').show();
+            }
+        });
+    });
+
+    function initializeDataTable() {
+        console.log('Initializing DataTable');
+        if ($('#results_table').length) {
+            try {
+                var table = $('#results_table').DataTable({
+                    "order": [[10, "desc"], [11, "asc"], [12, "asc"]],
+                    "pageLength": 20,
+                    'lengthChange': false,
+                    "columnDefs": [{
+                        "className": "text-left",
+                        "targets": [9, 10]
+                    }]
+                });
+
+                yadcf.init(table, [
+
+                // Uniprot
+                { column_number: 1, 
+                    filter_type: "multi_select", 
+                    select_type: "select2",
+                    column_data_type: "html",
+                    html_data_type: "text", 
+                    filter_match_mode : "exact",    
+                },
+
+                // IUPHAR
+                { column_number: 2, 
+                    filter_type: "multi_select", 
+                    select_type: "select2",
+                    column_data_type: "html",
+                    html_data_type: "text",
+                    // filter_default_label: "Select",
+                    filter_match_mode : "exact",     
+                },
+
+                // Target Chain
+                { column_number: 3, 
+                    filter_type: "multi_select", 
+                    select_type: "select2",
+                },
+
+                // Input Chain
+                { column_number: 4, 
+                    filter_type: "multi_select", 
+                    select_type: "select2", 
+                    filter_match_mode : "exact",  
+                },
+
+                // State
+                { column_number: 5, 
+                    filter_type: "multi_select", 
+                    select_type: "select2",
+                    filter_match_mode : "exact"  
+                },
+
+                // Class
+                { column_number: 6, 
+                    filter_type: "multi_select", 
+                    select_type: "select2"  
+                },
+
+                // Family
+                { column_number: 7, 
+                    filter_type: "multi_select", 
+                    select_type: "select2"  
+                },
+
+                // Species
+                { column_number: 8, 
+                    filter_type: "multi_select", 
+                    select_type: "select2"  
+                },
+
+                // Type
+                { column_number: 9, 
+                    filter_type: "multi_select", 
+                    select_type: "select2" 
+                },
+
+                { column_number: 10, 
+                    filter_type: "range_number" 
+                },
+                { column_number: 11, 
+                    filter_type: "range_number" 
+                },
+                { column_number: 12, 
+                    filter_type: "range_number" 
+                },
+                ]);
+
+
+                console.log('DataTable initialized successfully');
+            } catch (error) {
+                console.error('Error initializing DataTable:', error);
+            }
+        } else {
+            console.log('Results table not found');
+        }
+    }
+
+    // Data table manager
+
+    if ($.fn.dataTable.isDataTable('#results_table')) {
+        $('#results_table').DataTable().destroy();
+    }
+    
+    $('#results_table').DataTable({
+        // Your existing DataTable options
+        "scrollX": true, // Enable horizontal scrolling if needed
+        // Other options...
+    });
+
+    // Tool tip
+
+    $('.tooltip-wrapper').each(function() {
+        var $trigger = $(this).find('.tooltip-trigger');
+        var titleText = $trigger.attr('title');
+        $trigger.removeAttr('title');
+        $(this).find('.tooltiptext').text(titleText);
+    });
+
+});
+
+
+</script>
+
+{% endblock %}
+
+{% block addon_js %}
+<script src="{% static 'home/js/jquery.dataTables.min.js' %}"> </script>
+<script src="{% static 'home/js/jquery.dataTables.yadcf.js' %}"> </script>
+<script src="{% static 'home/js/select2.js' %}"> </script>
+<script src="{% static 'home/js/gpcrdb.js' %}"></script>
+<script src="{% static 'home/js/alignment.js' %}"> </script>
+<script src="{% static 'home/js/browser_functions.js' %}"> </script>
+<script src="{% static 'home/js/structure_browser.js' %}"> </script> <!-- Structure browser -->
+<script src="{% static 'home/js/jquery.powertip.js' %}"></script>
+<script src="{% static 'home/js/xlsx.full.min.js' %}"></script>  
+{% endblock %}
