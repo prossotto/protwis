@@ -1177,7 +1177,17 @@ class ParseAFComplexModels():
             if '-' not in f:
                 continue
 
-            receptor, signprot = f.split('-')
+            parts = f.split('-')
+            receptor = parts[0]
+
+            if len(parts) == 3:  # Case with peptide
+                peptide = parts[1]
+                signprot = parts[2]
+            else:  # Case without peptide
+                peptide = None
+                signprot = parts[1]
+
+            # receptor, signprot = f.split('-')
             metrics_file = os.sep.join([self.data_dir, f, f+'_metrics.csv'])
             metrics = [row for row in csv.DictReader(open(metrics_file, 'r'))][0]
             location = os.sep.join([self.data_dir, f, f+'.pdb'])
