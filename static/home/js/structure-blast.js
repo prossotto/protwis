@@ -23,6 +23,7 @@ $(document).ready(function() {
         }
 
         $.ajax({
+            timeout: 120000,  // 2 minutes
             url: $form.attr('action'),
             type: $form.attr('method'),
             data: new FormData(this),
@@ -44,9 +45,14 @@ $(document).ready(function() {
                 }
             },
             error: function(xhr, status, error) {
-                console.error('AJAX request failed:', status, error);
+                console.error('AJAX request failed');
+                console.error('Status:', status);
+                console.error('Error:', error);
+                console.error('Status code:', xhr.status);
+                console.error('Response text:', xhr.responseText);
+                
                 $spinner.hide();
-                $results.html('<p>An error occurred. Please try again.</p>').show();
+                $results.html('<p>An error occurred. Please try again. Error details: ' + status + ' - ' + error + '</p>').show();
             }
         });
     });

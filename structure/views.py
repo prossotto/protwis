@@ -3918,6 +3918,7 @@ class StructureBlastView(View):
                     return self.render_error(request, "An error occurred while processing your request. Please try again later.")
 
                 data = self.parse_and_enhance_results(result_file_path)
+
                 return render(request, self.template_name, {'data': data})
 
         except Exception as e:
@@ -4055,12 +4056,14 @@ class StructureBlastView(View):
                 )
 
                 # print('CONTAINER SET')
+                print('Container SET') # ERASE
 
                 result = container.wait()
 
                 logs = container.logs().decode('utf-8')
                 if result['StatusCode'] != 0:
                     return None, f"Foldseek execution failed: {logs}"
+                
 
                 result_file = os.path.join(output_dir, 'result.txt')
                 if not os.path.exists(result_file):
@@ -4101,19 +4104,22 @@ class StructureBlastView(View):
             output_content = file.readlines()
 
         temp_data = []
-        for line in output_content:
-            values = line.split('\t')
-            input_split = values[0].rsplit('_', 1)
-            input_chain = input_split[1] if len(input_split) == 2 else 'N/A'
-            protein_info = values[1].split('info')
-            protein, origin_acr, _ = protein_info[0].rsplit('_', 2)
-            chain = protein_info[1].replace('_', '') if protein_info[1] != '' else '-'
-            origin, linking, state = self.get_protein_origin_info(protein, origin_acr)
-            temp_data.append({
-                'input_chain': input_chain, "protein": protein, "chain": chain, "origin": origin, "linking": linking, 
-                "state": state, "TM_score": values[2], "E_value": values[4], "lddt": values[3]
-            })
-
+        try:
+            for line in output_content:
+                values = line.split('\t')
+                input_split = values[0].rsplit('_', 1)
+                input_chain = input_split[1] if len(input_split) == 2 else 'N/A'
+                protein_info = values[1].split('info')
+                protein, origin_acr, _ = protein_info[0].rsplit('_', 2)
+                chain = protein_info[1].replace('_', '') if protein_info[1] != '' else '-'
+                origin, linking, state = self.get_protein_origin_info(protein, origin_acr)
+                temp_data.append({
+                    'input_chain': input_chain, "protein": protein, "chain": chain, "origin": origin, "linking": linking, 
+                    "state": state, "TM_score": values[2], "E_value": values[4], "lddt": values[3]
+                })
+        except Exception as e:
+            print('Exception')
+            print(e)
         structure_info = self.get_structure_info()
         return self.enhance_data_with_db_info(temp_data, structure_info)
 
@@ -4156,13 +4162,13 @@ class StructureBlastView(View):
         if any(db_type in self.structure_type for db_type in ['raw_foldseek_db', 'ref_foldseek_db']):
             # Initialize filter_structures if not already done
             if 'raw_foldseek_db' in self.structure_type:
-                filter_structures.extend(['1', '2', '3'])
+                filter_structures.extend(['x-ray-diffraction', 'electron-microscopy', 'electron-crystallography'])
 
             if 'ref_foldseek_db' in self.structure_type:
-                filter_structures.extend(['4', '5'])
+                filter_structures.extend(['af-signprot-refined-cem', 'af-signprot-refined-xray'])
 
             exp_structures_info = Structure.objects.filter(
-                structure_type__in=filter_structures
+                structure_type__slug__in=filter_structures
             ).values_list(
                 'pdb_code__index', 'state__slug', 
                 'protein_conformation__protein__family__parent__parent__parent__name', # Class
@@ -4197,22 +4203,30 @@ class StructureBlastView(View):
         Enhance the parsed result data with additional information from the database.
         """
         data = []
+        print('DATA') # ERASE
         for entry in temp_data:
-            protein = entry["protein"]
-            structure_values = structures_info.get(protein)
-            data.append({
-                'input_chain': entry['input_chain'].strip(),
-                'protein': protein, 'chain': entry["chain"].strip(), 'type': entry["origin"].strip(), 
-                'TM_score': entry["TM_score"], 'lddt': entry['lddt'], 'E_value': entry["E_value"], 'link': entry["linking"], 
-                'state': entry["state"] or structure_values[1], 
-                'clas': structure_values[2].split(' ')[1].strip(),
-                'rec_fam': structure_values[3].replace('receptors', '').strip(),
-                'species': structure_values[4].strip(), 
-                'uniprot': structure_values[6].split('_')[0].upper().strip(),
-                'entry_name': structure_values[6],
-                'gtopdb': structure_values[5].replace('receptor', '').replace('-adrenoceptor', '').strip(),
-                'accession': structure_values[7],
-            })
+            try:
+                protein = entry["protein"]
+                structure_values = structures_info.get(protein)
+                data.append({
+                    'input_chain': entry['input_chain'].strip(),
+                    'protein': protein, 'chain': entry["chain"].strip(), 'type': entry["origin"].strip(), 
+                    'TM_score': entry["TM_score"], 'lddt': entry['lddt'], 'E_value': entry["E_value"], 'link': entry["linking"], 
+                    'state': entry["state"] or structure_values[1], 
+                    'clas': structure_values[2].split(' ')[1].strip(),
+                    'rec_fam': structure_values[3].replace('receptors', '').strip(),
+                    'species': structure_values[4].strip(), 
+                    'uniprot': structure_values[6].split('_')[0].upper().strip(),
+                    'entry_name': structure_values[6],
+                    'gtopdb': structure_values[5].replace('receptor', '').replace('-adrenoceptor', '').strip(),
+                    'accession': structure_values[7],
+                })
+            except Exception as e:
+                # print('An error occurred when enhancing data')
+                # print(e)
+                return
+                    
+
         return data
 
     def cleanup_resources(self):
