@@ -7,7 +7,6 @@ import datetime
 import logging
 from multiprocessing import Queue, Process, Value, Lock
 
-
 class Command(BaseCommand):
     help = 'Basic functions for build scrips'
 
@@ -26,7 +25,10 @@ class Command(BaseCommand):
             default=False,
             help='Include only a subset of data for testing')
 
+
+
     def prepare_input(self, proc, items, iteration=1):
+        
         q = Queue()
         procs = list()
         num_items = len(items)
@@ -48,10 +50,13 @@ class Command(BaseCommand):
                 last = False
             else:
                 last = chunk_size * (i + 1)
-    
             p = Process(target=self.main_func, args=([(first, last), iteration,num,lock]))
             procs.append(p)
-            p.start()
+            try:
+                p.start()
+            except Exception as e:
+                print('EXCEPTION OF PREPARE INPUT')
+                print(e)
 
         for p in procs:
             p.join()

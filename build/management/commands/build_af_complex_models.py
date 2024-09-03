@@ -18,7 +18,7 @@ from Bio.PDB import PDBParser, PPBuilder, PDBIO
 from Bio import pairwise2
 
 from structure.functions import ParseAFComplexModels
-from ligand.models import Ligand
+from ligand.models import Ligand, LigandPeptideStructure
 from interaction.models import *
 from interaction.views import regexaa, check_residue, extract_fragment_rotamer
 from signprot.models import SignprotComplex
@@ -97,7 +97,7 @@ class Command(BaseBuild):
     with open(xtal_seg_end_file, 'r') as f:
         xtal_seg_ends = yaml.load(f, Loader=yaml.Loader)
 
-    xtal_anomalies_file = os.sep.join([settings.DATA_DIR, 'structure_data', 'annotation', 'all_anomalities.yaml'])
+    xtal_anomalies_file = os.sep.join([settings.DATA_DIR, 'structure_data', 'annotation', 'all_anomalies.yaml'])
     with open(xtal_anomalies_file, 'r') as f2:
         xtal_anomalies = yaml.load(f2, Loader=yaml.Loader)
 
@@ -158,9 +158,13 @@ class Command(BaseBuild):
         try:
             self.logger.info('CREATING STRUCTURES')
             # run the function twice (once for representative structures, once for non-representative)
-            iterations = 1
-            for i in range(1,iterations+1):
-                self.prepare_input(options['proc'], self.parsed_structures.complexes, i)
+            # iterations = 1
+            # for i in range(1,iterations+1):
+            #     self.prepare_input(options['proc'], self.parsed_structures.complexes, i)
+
+            for key in self.parsed_structures.complexes:
+                self.main_func(self.parsed_structures.complexes[key])
+
             test_model_updates(self.all_models, self.tracker, check=True)
             self.logger.info('COMPLETED CREATING STRUCTURES')
         except Exception as msg:
@@ -748,7 +752,7 @@ class Command(BaseBuild):
             print('Something went wrong and we passed')
             pass
 
-    def main_func(self, positions, iteration, count, lock):
+    def main_func1(self, positions, iteration, count, lock):
         # setting up processes
         complexes = self.parsed_structures.complexes
         complexes = list(set(complexes)) #removing duplicates
@@ -843,7 +847,6 @@ class Command(BaseBuild):
                 os.remove('./{}.pdb'.format(sd['pdb']))
             except KeyError:
                 print("////////////////////////////WARNING: {} GN assign failed".format(sd['pdb']))
-
             pdbdata, created = PdbData.objects.get_or_create(pdb=pdbdata_raw)
             struct.pdb_data = pdbdata
 
@@ -872,7 +875,7 @@ class Command(BaseBuild):
                 self.logger.warning('No structure type specified in PDB file {}'.format(sd['pdb']))
 
 #################################################
-
+            print('ANNOTATING')
             # insert into plain text fields
             if 'preferred_chain' in sd:
                 struct.preferred_chain = sd['preferred_chain']
@@ -898,6 +901,31 @@ class Command(BaseBuild):
             # save structure before adding M2M relations
             struct.save()
 
+            print('BEFORE CREATING LIGAND')
+            # Create LigandPeptideStructure object
+            if 'peptide' in sd['model']:
+                try:
+                    # Get the existing Ligand object
+                    ligand = Ligand.objects.get(id=sd['ligand_id'])
+                    
+                    # Try to get existing LigandPeptideStructure or create a new one
+                    ligand_peptide_structure, created = LigandPeptideStructure.objects.get_or_create(
+                        structure=struct,
+                        ligand=ligand,
+                        chain='E',
+                        defaults={'model': struct.structure_type}  # Assuming you want to use the structure's type as the model
+                    )
+                    
+                    if created:
+                        print(f"Created new LigandPeptideStructure for structure {struct.pdb_code.index} and ligand {ligand.name}")
+                    else:
+                        print(f"Found existing LigandPeptideStructure for structure {struct.pdb_code.index} and ligand {ligand.name}")
+                
+                except Ligand.DoesNotExist:
+                    print(f"Error: Ligand with id {sd['ligand_id']} does not exist in the database.")
+                except Exception as e:
+                    print(f"Error creating LigandPeptideStructure: {str(e)}")
+            
 ####################################################
             Rotamer.objects.filter(structure=struct, pdbdata=pdbdata).delete()
             # Residue.objects.filter(protein_conformation=struct.protein_conformation).delete()
@@ -999,3 +1027,301 @@ class Command(BaseBuild):
             #     print(msg)
             #     print('ERROR WITH CONTACTNETWORK {}'.format(sd['pdb']))
             #     self.logger.error('Error with contactnetwork for {}'.format(sd['pdb']))
+
+
+
+
+
+    def main_func(self, cmpx):
+        # setting up processes
+        # complexes = self.parsed_structures.complexes
+        # complexes = list(set(complexes)) #removing duplicates
+        # complexes = complexes[730:]
+        # while count.value < len(complexes):
+        #     print('******************************************')
+        #     cmpx = complexes[count.value]
+        #     print('ITERATION NUMBER {} of {}'.format(count.value, len(complexes)-1))
+        #     print('******************************************')
+        #     print('PARSING DATA FOR COMPLEX: {}'.format(cmpx))
+        #     count.value +=1
+
+        # sd = self.parsed_structures.complexes[cmpx]
+        sd = cmpx
+        # print('Building structure {0} with peptide {1}'.format(sd['protein'], sd['peptide_id']))
+        self.logger.info('Building structure object of complex model {} with {}'.format(sd['receptor'], sd['signprot']))
+
+        representative = False
+        # does the construct exist?
+        try:
+            con = Protein.objects.get(entry_name=sd['receptor'].lower())
+        except Protein.DoesNotExist:
+            print('BIG ERROR Construct {} does not exists, skipping!'.format(sd['name'].lower()))
+            self.logger.error('Construct {} does not exists, skipping!'.format(sd['name'].lower()))
+            # continue
+            return
+
+        # get the PDB file and save to DB
+        if 'peptide' in sd['model']:
+            sd['pdb'] = f'AFM_{sd["receptor"].upper()}_{sd["ligand"].upper()}_{sd["signprot"].upper()}'
+        else:
+            sd['pdb'] = 'AFM_' + sd['receptor'].upper() + '_' + sd['signprot'].upper()
+
+        # create a structure record
+        # check if there is a ligand
+        try:
+            struct = Structure.objects.get(protein_conformation__protein=con, pdb_code__index=sd['pdb'], structure_type__slug=sd['model'])
+        except Structure.DoesNotExist:
+            struct = Structure()
+
+
+
+
+        # protein state
+        sd['state'] = 'Active'
+        state = sd['state']
+        state_slug = sd['state'].lower()
+
+        try:
+            ps, created = ProteinState.objects.get_or_create(slug=state_slug, defaults={'name': state})
+            if created:
+                self.logger.info('Created protein state {}'.format(ps.name))
+        except IntegrityError:
+            ps = ProteinState.objects.get(slug=state_slug)
+
+        struct.representative = representative
+        struct.state = ps
+        struct.author_state = ps
+
+        # protein conformation
+        try:
+            struct.protein_conformation = ProteinConformation.objects.get(protein=con)
+        except ProteinConformation.DoesNotExist:
+            self.logger.error('Protein conformation for construct {} does not exists'.format(con))
+            # continue
+            return
+
+        # if struct.protein_conformation.state is not state:
+        #     ProteinConformation.objects.filter(protein=con).update(state=ps)
+
+
+        pdb_path = sd['location']
+
+        header = ''
+        if not os.path.isfile(pdb_path):
+            print('Generated model file for protein {} is not available, skipping.'.format(sd['protein']))
+            self.logger.info('Generated model file for protein {} is not available, skipping.'.format(sd['protein']))
+            # continue
+            return
+        else:
+            try:
+                with open(pdb_path, 'r') as pdb_file:
+                    lines = pdb_file.readlines()
+                    header = lines[0]
+                    pdbdata_raw = ''.join(lines)
+            except FileNotFoundError:
+                print('File {} does not exist. Skipping'.format(pdb_path))
+                # continue
+                return
+        
+        ### GPCR GN assign
+        try:
+            pdb_struct = StringIO(pdbdata_raw)
+            assign_gn = as_gn.GenericNumbering(pdb_file=pdb_struct, blastdb=os.sep.join([settings.STATICFILES_DIRS[0], 'blast', 'protwis_human_blastdb']), sequence_parser=True)
+            pdb_struct = assign_gn.assign_generic_numbers_with_sequence_parser()
+            io = PDBIO()
+            io.set_structure(pdb_struct)
+
+            ### Use temp file for now
+            io.save('./{}.pdb'.format(sd['pdb']))
+            with open('./{}.pdb'.format(sd['pdb']), 'r') as pdb_file:
+                pdbdata_raw = header+pdb_file.read()
+            os.remove('./{}.pdb'.format(sd['pdb']))
+        except KeyError:
+            print("////////////////////////////WARNING: {} GN assign failed".format(sd['pdb']))
+        print('AFTER GN') # ERASE
+        pdbdata, created = PdbData.objects.get_or_create(pdb=pdbdata_raw)
+        struct.pdb_data = pdbdata
+
+        self.parsed_pdb = PDBParser(PERMISSIVE=True, QUIET=True, get_header=True).get_structure('ref', pdb_path)[0]
+        print('PARSED PDB') # ERASE
+        if 'pdb' in sd:
+            web_resource = WebResource.objects.get(slug='pdb')
+            struct.pdb_code, created = WebLink.objects.get_or_create(index=sd['pdb'], web_resource=web_resource)
+        else:
+            self.logger.error('PDB code not specified for structure {}, skipping!'.format(sd['pdb']))
+            # continue
+            return
+        print('STRUCTURE TYPE') # ERASE
+        # structure type
+        sd['structure_method'] = sd['model']
+        if 'structure_method' in sd and sd['structure_method']:
+            structure_type = 'Model (AF2)'
+            structure_type_slug = slugify(sd['structure_method'])
+            try:
+                st, created = StructureType.objects.get_or_create(slug=structure_type_slug, defaults={'name': structure_type})
+                if created:
+                    self.logger.info('Created structure type {}'.format(st))
+            except IntegrityError:
+                st = StructureType.objects.get(slug=structure_type_slug)
+            struct.structure_type = st
+        else:
+            self.logger.warning('No structure type specified in PDB file {}'.format(sd['pdb']))
+        print('No structure type') # ERASE
+#################################################
+
+        # insert into plain text fields
+        if 'preferred_chain' in sd:
+            struct.preferred_chain = sd['preferred_chain']
+        else:
+            self.logger.warning('Preferred chain not specified for structure {}'.format(sd['pdb']))
+        if 'resolution' in sd:
+            struct.resolution = float(sd['resolution'])
+        else:
+            struct.resolution = None
+            self.logger.warning('Resolution not specified for structure {}. Setting as null'.format(sd['pdb']))
+        if 'publication_date' in sd:
+            struct.publication_date = sd['publication_date']
+        else:
+            sd['publication_date'] = build_date = date.today()
+            struct.publication_date = sd['publication_date']
+            self.logger.warning('Publication date not specified for structure {}. Defaulting at today'.format(sd['pdb']))
+
+        struct.annotated = True
+        struct.refined = False
+        struct.stats_text = None
+        print('SAVED STRUCT')
+        #Resolution and
+        # save structure before adding M2M relations
+        struct.save()
+
+        print('BEFORE CREATING LIGAND')
+        # Create LigandPeptideStructure object
+        if 'peptide' in sd['model']:
+            try:
+                # Get the existing Ligand object
+                ligand = Ligand.objects.get(id=sd['ligand_id'])
+                
+                # Try to get existing LigandPeptideStructure or create a new one
+                ligand_peptide_structure, created = LigandPeptideStructure.objects.get_or_create(
+                    structure=struct,
+                    ligand=ligand,
+                    chain='E',
+                    defaults={'model': None}  # Assuming you want to use the structure's type as the model
+                )
+                
+                if created:
+                    print(f"Created new LigandPeptideStructure for structure {struct.pdb_code.index} and ligand {ligand.name}")
+                else:
+                    print(f"Found existing LigandPeptideStructure for structure {struct.pdb_code.index} and ligand {ligand.name}")
+            
+            except Ligand.DoesNotExist:
+                print(f"Error: Ligand with id {sd['ligand_id']} does not exist in the database.")
+            except Exception as e:
+                print(f"Error creating LigandPeptideStructure: {str(e)}")
+
+####################################################
+        Rotamer.objects.filter(structure=struct, pdbdata=pdbdata).delete()
+        # Residue.objects.filter(protein_conformation=struct.protein_conformation).delete()
+        print('AFTER ROTAMER')
+####################################################
+        d = {}
+
+        # try:
+        #     current = time.time()
+        #     self.create_rotamers(struct, pdb_path, d)
+        #     # residue_errors = sbc.check_rotamers(s.pdb_code.index)
+        #     # if len(residue_errors)>0:
+        #     #     raise Exception('Error with rotamer check: {}'.format(residue_errors))
+        #     end = time.time()
+        #     diff = round(end - current,1)
+        #     print('Create resides/rotamers done for {}. {} seconds.'.format(struct.protein_conformation.protein.entry_name, diff))
+        # except Exception as msg:
+        #     print(msg)
+        #     print('ERROR WITH ROTAMERS {}'.format(sd['pdb']))
+        #     self.logger.error('Error with rotamers for {}'.format(sd['pdb']))
+        #     self.rotamer_errors.append(struct)
+
+        try:
+            struct.protein_conformation.generate_sites()
+        except:
+            pass
+        print('SIGNPROT')
+        ##### SIGNPROT
+        beta_gamma = sd['beta_gamma']
+        print('BETA GAMMA')
+        print(sd['beta_gamma'])
+        print(sd['signprot'])
+        signprot = Protein.objects.get(entry_name=sd['signprot'])
+        print('SIGNPROT As OBJECT')
+        signprot_conf = ProteinConformation.objects.get(protein=signprot)
+        print('BETA GAMMA')
+        if beta_gamma:
+            beta_protconf = ProteinConformation.objects.get(protein__entry_name='gbb1_human')
+            gamma_protconf = ProteinConformation.objects.get(protein__entry_name='gbg2_human')
+            sc = SignprotComplex.objects.get_or_create(alpha='B', protein=signprot, structure=struct,
+                                                        beta_chain='C', gamma_chain='D', beta_protein=beta_protconf.protein, gamma_protein=gamma_protconf.protein)
+        else:
+            sc = SignprotComplex.objects.get_or_create(alpha='B', protein=signprot, structure=struct,
+                                                        beta_chain=None, gamma_chain=None, beta_protein=None, gamma_protein=None)
+        struct.signprot_complex = sc[0]
+        struct.save()
+        print('SAVE SIGNPROT')
+        #### Adding metrics to StructureAFScores
+
+        try:
+            metrics = StructureAFScores.objects.get(structure=struct)
+        except StructureAFScores.DoesNotExist:
+            metrics = StructureAFScores()
+
+        metrics.structure = struct
+        metrics.ptm = sd['PTM']
+        metrics.iptm = sd['iPTM']
+        metrics.pae_mean = sd['PAE_mean']
+        metrics.save()
+        print('METRICS')
+        ##### StructureExtraProteins
+        try:
+            display_name = g_prot_dict[signprot.entry_name.split('_')[0].upper()]
+            cat = 'G alpha'
+        except:
+            display_name = arr_dict[signprot.entry_name]
+            cat = 'Arrestin'
+
+        sep = StructureExtraProteins.objects.get_or_create(display_name=display_name, note=None, chain='B', category=cat, wt_coverage=100, protein_conformation=signprot_conf, structure=struct, wt_protein=signprot)
+        if beta_gamma:
+            sep_beta = StructureExtraProteins.objects.get_or_create(display_name='G&beta;1', note=None, chain='C', category='G beta', wt_coverage=100, protein_conformation=beta_protconf, structure=struct, wt_protein=beta_protconf.protein)
+            sep_beta = StructureExtraProteins.objects.get_or_create(display_name='G&gamma;2', note=None, chain='D', category='G gamma', wt_coverage=100, protein_conformation=gamma_protconf, structure=struct, wt_protein=gamma_protconf.protein)
+        # g beta - TO BE ADDED
+        # g gamma - TO BE ADDED
+
+        #Adding plDDT for rendering
+        resis = []
+        for chain in self.parsed_pdb:
+            for res in chain:
+                plddt = res['C'].get_bfactor()
+                try:
+                    if chain.get_id()=='A':
+                        res_obj = Residue.objects.get(protein_conformation__protein=con, sequence_number=res.get_id()[1])
+                    elif chain.get_id()=='B':
+                        res_obj = Residue.objects.get(protein_conformation__protein=signprot, sequence_number=res.get_id()[1])
+                    elif chain.get_id()=='C':
+                        res_obj = Residue.objects.get(protein_conformation__protein=beta_protconf.protein, sequence_number=res.get_id()[1])
+                    elif chain.get_id()=='D':
+                        res_obj = Residue.objects.get(protein_conformation__protein=gamma_protconf.protein, sequence_number=res.get_id()[1])
+                    r = StructureModelpLDDT(structure=struct, residue=res_obj, pLDDT=plddt)
+                    resis.append(r)
+                except Residue.DoesNotExist:
+                    continue
+        StructureModelpLDDT.objects.bulk_create(resis)
+
+        # try:
+        current = time.time()
+        # compute_interactions(sd['location'], protein=struct, lig=l, do_peptide_ligand=True, save_to_db=True, file_input=True)
+        self.build_contact_network(sd['location'], receptor=struct, signprot=signprot)
+        end = time.time()
+        diff = round(end - current,1)
+        print('Create contactnetwork done for {}.'.format(struct.protein_conformation.protein.entry_name))
+        # except Exception as msg:
+        #     print(msg)
+        #     print('ERROR WITH CONTACTNETWORK {}'.format(sd['pdb']))
+        #     self.logger.error('Error with contactnetwork for {}'.format(sd['pdb']))
