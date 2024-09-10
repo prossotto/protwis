@@ -1,16 +1,13 @@
-
 label {
     font-weight: bold;
     margin-right: 10px;
 }
-
 body {
     font-family: Arial, sans-serif;
     background-color: white;
     margin: 0;
     padding: 20px;
 }
-
 h1 {
     text-align: center;
     color: #333;
@@ -21,7 +18,6 @@ h1 {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
 form {
     background: #fff;
     padding: 20px;
@@ -30,15 +26,12 @@ form {
     max-width: 1000px;
     margin: 0 auto;
 }
-
 .flex-container {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     gap: 20px;
-    padding-bottom: 2rem;
 }
-
 .section {
     flex: 1;
     min-width: 200px;
@@ -48,42 +41,36 @@ form {
     padding: 20px;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
-
 .section .row {
     display: flex;
     align-items: center;
     margin-bottom: 10px;
 }
-
-input[type="file"] {
-    display: block;
+input[type="file"], button {
+    width: 100%;
     margin-bottom: 20px;
 }
-
 button {
-    display: block;
-    width: 100%;
-    padding: 10px;
+    padding: 10px; /* Increase padding to make the button more square */
+    width: 80%; /* Maintain full width */
+    height: fit-content;
     background-color: #007bff;
     color: white;
     border: none;
-    border-radius: 5px;
+    border-radius: 5px; /* You can reduce or remove border-radius if you want a more square or rectangular shape */
     font-size: 16px;
     cursor: pointer;
     transition: background-color 0.3s ease;
 }
-
 button:hover {
     background-color: #0056b3;
 }
-
 /* Tooltip styles */
 .tooltip-wrapper, .tooltip {
     position: relative;
     display: inline-block;
     cursor: pointer;
 }
-
 .tooltiptext {
     visibility: hidden;
     background-color: #ffffff;
@@ -95,17 +82,15 @@ button:hover {
     z-index: 1;
     box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.1);
     border: 1px solid #ddd;
-    transform: translateX(-50%); /* Center the tooltip */
+    transform: translateX(-50%);
     min-width: 200px;
     max-width: 350px;
     width: max-content;
     white-space: normal;
 }
-
 .tooltip-wrapper:hover .tooltiptext, .tooltip:hover .tooltiptext {
     visibility: visible;
 }
-
 /* Spinner styles */
 .spinner {
     border: 4px solid rgba(0, 0, 0, 0.1);
@@ -116,7 +101,6 @@ button:hover {
     animation: spin 1s ease infinite;
     margin: 0 auto;
 }
-
 @keyframes spin {
     0% {
         transform: rotate(0deg);
@@ -125,14 +109,12 @@ button:hover {
         transform: rotate(360deg);
     }
 }
-
 #loading-spinner {
     text-align: center;
     margin-top: 20px;
     font-family: Arial, sans-serif;
     color: #333;
 }
-
 /* Data Table */
 #results {
     width: 100%;
@@ -140,28 +122,24 @@ button:hover {
     justify-content: center;
     margin-top: 20px;
 }
-
 #results_table {
     width: 100%;
     max-width: 1200px;
     margin: 0 auto;
+    font-size: medium;
 }
-
 .dataTables_wrapper {
     width: 100%;
     margin: 0 auto;
     overflow-x: auto;
 }
-
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .flex-container {
         flex-direction: column;
         align-items: stretch;
     }
-
     .section {
         margin-bottom: 20px;
     }
 }
-

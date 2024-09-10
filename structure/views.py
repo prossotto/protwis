@@ -2,14 +2,13 @@ from django.shortcuts import render
 from django.conf import settings
 from django.views.generic import TemplateView, View
 from django.http import HttpResponse, HttpResponseRedirect
-from django.db.models import Count, Q, Prefetch, TextField, Avg, Case, When, CharField
+from django.db.models import Count, Q, Prefetch, TextField, Avg, Case, When, CharField, Subquery, OuterRef
 from django.db.models.functions import Concat
 from django import forms
 
 from django.shortcuts import redirect
 
 from common.phylogenetic_tree import PhylogeneticTreeGenerator
-from protein.models import ProteinSegment
 from structure.models import Structure, StructureModel, StructureComplexModel, StructureExtraProteins, StructureVectors, StructureModelRMSD, StructureModelpLDDT, StructureAFScores
 from structure.functions import CASelector, SelectionParser, GenericNumbersSelector, SubstructureSelector, ModelRotamer
 from structure.assign_generic_numbers_gpcr import GenericNumbering, GenericNumberingFromDB
@@ -17,7 +16,7 @@ from structure.structural_superposition import ProteinSuperpose, FragmentSuperpo
 from structure.forms import *
 from signprot.models import SignprotComplex, SignprotStructure, SignprotStructureExtraProteins
 from interaction.models import ResidueFragmentInteraction,StructureLigandInteraction
-from protein.models import Protein, ProteinFamily, ProteinCouplings
+from protein.models import Protein, ProteinFamily, ProteinCouplings, ProteinSegment, Gene
 from construct.models import Construct
 from construct.functions import convert_ordered_to_disordered_annotation,add_construct
 from common.views import AbsSegmentSelection,AbsReferenceSelection
@@ -3856,6 +3855,9 @@ def semaphore_view(semaphore, timeout=5):
         return wrapped_view
     return decorator
 
+def print_raw_sql(queryset):
+    print(queryset.query)
+    print(queryset.query.sql_with_params())
 
 # Structure Blast
 #----------------
@@ -3902,13 +3904,15 @@ class StructureBlastView(View):
                 self.structure_type = [self.get_structure_type(method) for method in self.structure_methods]
 
                 alignment_method = request.POST.get('alignment_method')
-                tm7_h8 = request.POST.get('tm7_h8') == 'True'
+                # tm7_h8 = request.POST.get('tm7_h8') == 'True'
 
                 alignment_type = self.get_alignment_type(alignment_method)
                 if alignment_type is None:
                     return self.render_error(request, "Invalid alignment method selected. Please try again.")
 
-                fdb = self.get_combined_fdb(tm7_h8)
+                fdb = self.get_combined_fdb()
+                print('FDB')
+                print(fdb)
 
                 result_file_path, error_message = self.run_foldseek(temp_file_path, fdb, alignment_type)
                 if error_message:
@@ -3924,11 +3928,11 @@ class StructureBlastView(View):
         except Exception as e:
             return self.render_error(request, "An unexpected error occurred. Please try again later.")
 
-    def get_combined_fdb(self, tm7_h8):
+    def get_combined_fdb(self):
         """
         Get the path to the combined symbolic link database based on selected structure types.
         """
-        db_suffix = "_trim" if tm7_h8 else ""
+        db_suffix = "_trim"
 
         db_paths = {
             "af_foldseek_db": os.path.join(settings.DATA_DIR, 'structure_data', f'af_foldseek_db{db_suffix}'),
@@ -4063,7 +4067,6 @@ class StructureBlastView(View):
                 logs = container.logs().decode('utf-8')
                 if result['StatusCode'] != 0:
                     return None, f"Foldseek execution failed: {logs}"
-                
 
                 result_file = os.path.join(output_dir, 'result.txt')
                 if not os.path.exists(result_file):
@@ -4144,21 +4147,36 @@ class StructureBlastView(View):
         """
         structures_info = {}
         filter_structures = []
+        print('Get Structure Info BEFORE') # ERASE
 
         if 'af_foldseek_db' in self.structure_type:
-            af_structures = StructureModel.objects.filter(main_template__isnull=True).values_list(
-                'protein__entry_name', 'state__slug', 
-                'protein__family__parent__parent__parent__name',  # Class
-                'protein__family__parent__name',  # Family
-                'protein__species__common_name', 
-                'protein__name',
-                'protein__entry_name', 
-                'protein__accession',
-            )
+            try:
+                gene_subquery_models = Gene.objects.filter(proteins=OuterRef('protein__pk')).values('name')[:1]
+                print('First sub succs')
+
+            except Exception as e:
+                print('First SUB fail')
+                print(e)
+            try:
+                af_structures = StructureModel.objects.filter(main_template__isnull=True).annotate( gene_name=Subquery(gene_subquery_models)
+                ).values_list(
+                    'protein__entry_name', 'state__slug', 
+                    'protein__family__parent__parent__parent__name',  # Class
+                    'protein__family__parent__name',  # Family
+                    'protein__species__common_name', 
+                    'protein__name',
+                    'protein__entry_name', 
+                    'protein__accession',
+                    'gene_name',
+                )
+                print('Full query sucess')
+            except Exception as e:
+                print(e)
+                print('full first fail')
             
             structures_info.update({f'{item[0]}_{item[1]}': item for item in af_structures})
         
-
+        print('First If successful') # ERASE
         if any(db_type in self.structure_type for db_type in ['raw_foldseek_db', 'ref_foldseek_db']):
             # Initialize filter_structures if not already done
             if 'raw_foldseek_db' in self.structure_type:
@@ -4166,9 +4184,19 @@ class StructureBlastView(View):
 
             if 'ref_foldseek_db' in self.structure_type:
                 filter_structures.extend(['af-signprot-refined-cem', 'af-signprot-refined-xray'])
+            try:
+                gene_subquery_exp = Gene.objects.filter(proteins=OuterRef('protein_conformation__protein__pk')).values('name')[:1]
+                print('Sub query successful') # ERASE
+            except Exception as e:
+                    print('Sub query UN')
+                    print(e)
+
+
 
             exp_structures_info = Structure.objects.filter(
                 structure_type__slug__in=filter_structures
+            ).annotate(
+                gene_name=Subquery(gene_subquery_exp)
             ).values_list(
                 'pdb_code__index', 'state__slug', 
                 'protein_conformation__protein__family__parent__parent__parent__name', # Class
@@ -4192,9 +4220,10 @@ class StructureBlastView(View):
                     default='protein_conformation__protein__accession',
                     output_field=CharField(),
                 ),
+                'gene_name'
             )
             structures_info.update({item[0]: item for item in exp_structures_info})
-
+            print('Second IF successful') # ERASE
         return structures_info
 
     @staticmethod
@@ -4220,13 +4249,14 @@ class StructureBlastView(View):
                     'entry_name': structure_values[6],
                     'gtopdb': structure_values[5].replace('receptor', '').replace('-adrenoceptor', '').strip(),
                     'accession': structure_values[7],
+                    'gene': structure_values[8],
                 })
             except Exception as e:
                 # print('An error occurred when enhancing data')
                 # print(e)
                 return
-                    
-
+        print(data)
+        print(['DATA HERE'])
         return data
 
     def cleanup_resources(self):

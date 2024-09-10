@@ -28,15 +28,16 @@
 <form method="post" enctype="multipart/form-data" id="structure-blast-form">
     {% csrf_token %}
     <div class="flex-container">
-        <div class="file-upload-section">
+        <div class="file-upload-section" style="width: 25%;">
             <label for="input_pdb">Upload a pdb file (query):
                 <input type="file" id="input_pdb" name="input_file" required>
             </label>
-            <div>
+            <button type="submit">Submit</button>
+            <!-- <div>
                 <input type="hidden" name="tm7_h8" value="False">
                 <input type="checkbox" id="tm7_h8" name="tm7_h8" value="True">
                 <label for="tm7_h8">By 7TM and H8</label>
-            </div>
+            </div> -->
         </div>
 
         <div class="section">
@@ -87,7 +88,7 @@
         </div>
     </div>
 
-    <button type="submit">Submit</button>
+
 </form>
 
 <!-- LOADER SECTION -->
@@ -101,18 +102,18 @@
     <table id="results_table" class="display">
         <thead>
             <tr>
-                <th></th>  <!--For Icon -->
-                <th>Uniprot</th>
-                <th>IUPHAR</th>
-                <th>Target Chain</th>
-                <th>Input Chain</th>
+                <th></th>  <!--For Icon 0 -->
+                <th>Gene <br> name</th> <!--1 -->
+                <th>Protein <br>name</th>
+                <th>Target <br> Chain</th>
+                <th>Input  <br> Chain</th>
                 <th>State</th>
                 <th>Class</th>
                 <th>Family</th>
                 <th>Species</th>
                 <th>Type</th>
-                <th>TM Score</th>
-                <th>LDDT Score</th>
+                <th>TM  <br> Score</th>
+                <th>LDDT  <br> Score</th>
                 <th>E-value</th>
             </tr>
         </thead>
@@ -125,14 +126,14 @@
                     </a>
                 </td>
                 <td>
-                    <a href="http://www.uniprot.org/uniprot/{{ row.accession }}" target="_blank">{{ row.uniprot }}</a>
+                    <a href="http://www.uniprot.org/uniprot/{{ row.accession }}" target="_blank">{{ row.gene }}</a>
                 </td>
                 <td>
                     <a href="/protein/{{ row.entry_name }}" target="_blank">{{ row.gtopdb|safe }}</a>
                 </td>
                 <td>{{ row.chain }}</td>
                 <td>{{ row.input_chain }}</td>
-                <td>{{ row.state }}</td>
+                <td>{{ row.state | title}}</td>
                 <td>{{ row.clas }}</td>
                 <td>{{ row.rec_fam }}</td>
                 <td>{{ row.species }}</td>

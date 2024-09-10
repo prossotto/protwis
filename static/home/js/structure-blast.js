@@ -65,10 +65,16 @@ $(document).ready(function() {
                     "order": [[10, "desc"], [11, "asc"], [12, "asc"]],
                     "pageLength": 20,
                     'lengthChange': false,
-                    "columnDefs": [{
-                        "className": "text-left",
-                        "targets": [9, 10]
-                    }]
+                    "columnDefs": [
+                        {
+                            "className": "text-left",
+                            "targets": [9, 10]
+                        },
+                        {
+                            "targets": [3],  // Adjust these indices as needed
+                            "visible": false    // This will hide the specified columns
+                        }
+                    ]
                 });
 
                 yadcf.init(table, [
