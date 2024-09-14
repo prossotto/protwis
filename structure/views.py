@@ -2,7 +2,7 @@ from django.shortcuts import render
 from django.conf import settings
 from django.views.generic import TemplateView, View
 from django.http import HttpResponse, HttpResponseRedirect
-from django.db.models import Count, Q, Prefetch, TextField, Avg, Case, When, CharField, Subquery, OuterRef
+from django.db.models import Count, Q, Prefetch, TextField, Avg, Case, When, CharField, Subquery, OuterRef, F, ExpressionWrapper
 from django.db.models.functions import Concat
 from django import forms
 
@@ -3866,7 +3866,7 @@ class StructureBlastView(View):
     """
     A Django view for handling structure blast operations using Foldseek.
     """
-    template_name = 'structure_blast.html'
+    template_name = 'structure_similarity_search.html'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -3915,9 +3915,9 @@ class StructureBlastView(View):
                 print(fdb)
 
                 result_file_path, error_message = self.run_foldseek(temp_file_path, fdb, alignment_type)
+                print('RESULT got')
                 if error_message:
                     return self.render_error(request, error_message)
-
                 if not result_file_path:
                     return self.render_error(request, "An error occurred while processing your request. Please try again later.")
 
@@ -3953,7 +3953,7 @@ class StructureBlastView(View):
         """
         Manage a temporary file using a context manager.
         """
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f'_chain{file_extension}')
         self.cleanup_resources.append(temp_file.name)
         try:
             for chunk in input_file.chunks():
@@ -4060,7 +4060,6 @@ class StructureBlastView(View):
                 )
 
                 # print('CONTAINER SET')
-                print('Container SET') # ERASE
 
                 result = container.wait()
 
@@ -4110,11 +4109,11 @@ class StructureBlastView(View):
         try:
             for line in output_content:
                 values = line.split('\t')
-                input_split = values[0].rsplit('_', 1)
-                input_chain = input_split[1] if len(input_split) == 2 else 'N/A'
+                input_split = values[0].split('_chain_')
+                input_chain = input_split[1] if len(input_split) == 2 else '-'
                 protein_info = values[1].split('info')
                 protein, origin_acr, _ = protein_info[0].rsplit('_', 2)
-                chain = protein_info[1].replace('_', '') if protein_info[1] != '' else '-'
+                chain = protein_info[1].replace('_', '').upper() if protein_info[1] != '' else '-'
                 origin, linking, state = self.get_protein_origin_info(protein, origin_acr)
                 temp_data.append({
                     'input_chain': input_chain, "protein": protein, "chain": chain, "origin": origin, "linking": linking, 
@@ -4147,7 +4146,6 @@ class StructureBlastView(View):
         """
         structures_info = {}
         filter_structures = []
-        print('Get Structure Info BEFORE') # ERASE
 
         if 'af_foldseek_db' in self.structure_type:
             try:
@@ -4155,8 +4153,9 @@ class StructureBlastView(View):
                 print('First sub succs')
 
             except Exception as e:
-                print('First SUB fail')
-                print(e)
+                e
+                # print('First SUB fail')
+                # print(e)
             try:
                 af_structures = StructureModel.objects.filter(main_template__isnull=True).annotate( gene_name=Subquery(gene_subquery_models)
                 ).values_list(
@@ -4175,55 +4174,71 @@ class StructureBlastView(View):
                 print('full first fail')
             
             structures_info.update({f'{item[0]}_{item[1]}': item for item in af_structures})
-        
-        print('First If successful') # ERASE
-        if any(db_type in self.structure_type for db_type in ['raw_foldseek_db', 'ref_foldseek_db']):
-            # Initialize filter_structures if not already done
-            if 'raw_foldseek_db' in self.structure_type:
-                filter_structures.extend(['x-ray-diffraction', 'electron-microscopy', 'electron-crystallography'])
 
-            if 'ref_foldseek_db' in self.structure_type:
-                filter_structures.extend(['af-signprot-refined-cem', 'af-signprot-refined-xray'])
+        if 'raw_foldseek_db' in self.structure_type:
+
+            filter_structures.extend(['x-ray-diffraction', 'electron-microscopy', 'electron-crystallography'])
             try:
-                gene_subquery_exp = Gene.objects.filter(proteins=OuterRef('protein_conformation__protein__pk')).values('name')[:1]
-                print('Sub query successful') # ERASE
+                gene_subquery_exp = Gene.objects.filter(proteins=OuterRef('protein_conformation__protein__parent__pk')).values('name')[:1]
             except Exception as e:
-                    print('Sub query UN')
-                    print(e)
+                print('Sub failed')
+                print(e)
+            print('RAw sub succs')
+            try:
+                exp_structures_info_null_accession = Structure.objects.filter(
+                    structure_type__slug__in=filter_structures,
+                    protein_conformation__protein__accession__isnull=True
+                ).annotate(
+                    gene_name=Subquery(gene_subquery_exp)
+                ).values_list(
+                    'pdb_code__index', 
+                    'state__slug', 
+                    'protein_conformation__protein__family__parent__parent__parent__name',  # Class
+                    'protein_conformation__protein__family__parent__name',  # Family
+                    'protein_conformation__protein__species__common_name', 
+                    'protein_conformation__protein__parent__name',  # Parent name
+                    'protein_conformation__protein__parent__entry_name',  # Parent entry name
+                    'protein_conformation__protein__parent__accession',  # Parent accession
+                    'gene_name'
+                )
 
+                try:
+                    structures_info.update({item[0]: item for item in exp_structures_info_null_accession})
+                except Exception as e:
+                    return
 
+            except Exception as e:
+                # print('Raw failed')
+                # print(e)
+                return
 
-            exp_structures_info = Structure.objects.filter(
-                structure_type__slug__in=filter_structures
-            ).annotate(
-                gene_name=Subquery(gene_subquery_exp)
-            ).values_list(
-                'pdb_code__index', 'state__slug', 
-                'protein_conformation__protein__family__parent__parent__parent__name', # Class
-                'protein_conformation__protein__family__parent__name', # Family
-                'protein_conformation__protein__species__common_name', 
-                Case(
-                    When(protein_conformation__protein__accession__isnull=True,
-                        then='protein_conformation__protein__parent__name'),
-                    default='protein_conformation__protein__name',
-                    output_field=CharField(),
-                ),                                                                      
-                Case(
-                    When(protein_conformation__protein__accession__isnull=True,
-                        then='protein_conformation__protein__parent__entry_name'),
-                    default='protein_conformation__protein__entry_name',
-                    output_field=CharField(),
-                ),                                                                  
-                Case(
-                    When(protein_conformation__protein__accession__isnull=True,
-                        then='protein_conformation__protein__parent__accession'),
-                    default='protein_conformation__protein__accession',
-                    output_field=CharField(),
-                ),
-                'gene_name'
-            )
-            structures_info.update({item[0]: item for item in exp_structures_info})
-            print('Second IF successful') # ERASE
+        if 'ref_foldseek_db' in self.structure_type:
+            filter_structures.extend(['af-signprot-refined-cem', 'af-signprot-refined-xray'])
+            gene_subquery_ref = Gene.objects.filter(proteins=OuterRef('protein_conformation__protein__pk')).values('name')[:1]
+
+            try:
+                exp_structures_info_null_accession = Structure.objects.filter(
+                    structure_type__slug__in=filter_structures,
+                    protein_conformation__protein__accession__isnull=False
+                ).annotate(
+                    gene_name=Subquery(gene_subquery_ref)
+                ).values_list(
+                    'pdb_code__index', 
+                    'state__slug', 
+                    'protein_conformation__protein__family__parent__parent__parent__name',  # Class
+                    'protein_conformation__protein__family__parent__name',  # Family
+                    'protein_conformation__protein__species__common_name', 
+                    'protein_conformation__protein__name',  # Regular protein name
+                    'protein_conformation__protein__entry_name',  # Regular entry name
+                    'protein_conformation__protein__accession',  # Regular accession
+                    'gene_name'
+                )
+
+                structures_info.update({item[0]: item for item in exp_structures_info_null_accession})
+            except Exception as e:
+                print('REF failed')
+                print(e)
+
         return structures_info
 
     @staticmethod
@@ -4232,14 +4247,13 @@ class StructureBlastView(View):
         Enhance the parsed result data with additional information from the database.
         """
         data = []
-        print('DATA') # ERASE
         for entry in temp_data:
             try:
                 protein = entry["protein"]
                 structure_values = structures_info.get(protein)
                 data.append({
                     'input_chain': entry['input_chain'].strip(),
-                    'protein': protein, 'chain': entry["chain"].strip(), 'type': entry["origin"].strip(), 
+                    'protein': protein, 'chain': entry["chain"].strip(), 'type': entry["origin"].replace('Experimental', 'exp').replace('experimental', 'exp').strip(), 
                     'TM_score': entry["TM_score"], 'lddt': entry['lddt'], 'E_value': entry["E_value"], 'link': entry["linking"], 
                     'state': entry["state"] or structure_values[1], 
                     'clas': structure_values[2].split(' ')[1].strip(),
@@ -4250,13 +4264,13 @@ class StructureBlastView(View):
                     'gtopdb': structure_values[5].replace('receptor', '').replace('-adrenoceptor', '').strip(),
                     'accession': structure_values[7],
                     'gene': structure_values[8],
+                    'pdb_id': '-' if structure_values[0].endswith('refined') or structure_values[0].endswith('human') else structure_values[0]
                 })
             except Exception as e:
                 # print('An error occurred when enhancing data')
                 # print(e)
                 return
-        print(data)
-        print(['DATA HERE'])
+
         return data
 
     def cleanup_resources(self):

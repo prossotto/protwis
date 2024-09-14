@@ -62,34 +62,51 @@ $(document).ready(function() {
         if ($('#results_table').length) {
             try {
                 var table = $('#results_table').DataTable({
-                    "order": [[10, "desc"], [11, "asc"], [12, "asc"]],
+                    "order": [[1, "desc"], [2, "asc"], [3, "asc"]],
                     "pageLength": 20,
                     'lengthChange': false,
-                    "columnDefs": [
-                        {
-                            "className": "text-left",
-                            "targets": [9, 10]
-                        },
-                        {
-                            "targets": [3],  // Adjust these indices as needed
-                            "visible": false    // This will hide the specified columns
+                    "columnDefs": [{
+                        "className": "text-left",
+                        "targets": [9, 10]
+                    },
+                    {
+                        "targets": [1,2,3],  
+                        "render": function(data, type, row) {
+                            if (type === 'display') {
+                                return parseFloat(data).toExponential(1);  // Display with one decimal in exponential notation
+                            }
+                            return data;  // Return the original data for sorting/filtering
                         }
-                    ]
+                    },
+                    {
+                        "targets": [9,10],  // Column
+                        "createdCell": function(td, cellData, rowData, row, col) {
+                            // Set initial small width
+                            $(td).css({
+                                "width": "5px",      // Initial small width
+                                "overflow": "hidden", // Hide overflow content
+                                "white-space": "nowrap", // Prevent text wrapping
+                                "transition": "width 0.3s ease" // Smooth transition effect
+                            });
+                        }
+                    }
+                ]
                 });
 
+
                 yadcf.init(table, [
-                    { column_number: 1, filter_type: "multi_select", select_type: "select2", column_data_type: "html", html_data_type: "text", filter_match_mode : "exact" },
-                    { column_number: 2, filter_type: "multi_select", select_type: "select2", column_data_type: "html", html_data_type: "text", filter_match_mode : "exact" },
-                    { column_number: 3, filter_type: "multi_select", select_type: "select2" },
-                    { column_number: 4, filter_type: "multi_select", select_type: "select2", filter_match_mode : "exact" },
-                    { column_number: 5, filter_type: "multi_select", select_type: "select2", filter_match_mode : "exact" },
-                    { column_number: 6, filter_type: "multi_select", select_type: "select2" },
-                    { column_number: 7, filter_type: "multi_select", select_type: "select2" },
-                    { column_number: 8, filter_type: "multi_select", select_type: "select2" },
-                    { column_number: 9, filter_type: "multi_select", select_type: "select2" },
-                    { column_number: 10, filter_type: "range_number" },
-                    { column_number: 11, filter_type: "range_number" },
-                    { column_number: 12, filter_type: "range_number" },
+                    { column_number: 1, filter_type: "range_number", filter_reset_button_text:false }, //TM score
+                    { column_number: 2, filter_type: "range_number", filter_reset_button_text:false }, // LDDT
+                    { column_number: 3, filter_type: "range_number", filter_reset_button_text:false  }, // E value
+                    { column_number: 4, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, // PDB ID
+                    { column_number: 5, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, // Structure/model
+                    { column_number: 6, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, 
+                    { column_number: 7, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, 
+                    { column_number: 8, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2", column_data_type: "html", html_data_type: "text", filter_match_mode : "exact" },
+                    { column_number: 9, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, 
+                    { column_number: 10, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, 
+                    { column_number: 11, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, 
+                    { column_number: 12, filter_type: "multi_select", filter_reset_button_text:false ,select_type: "select2" }, 
                 ]);
 
                 console.log('DataTable initialized successfully');
