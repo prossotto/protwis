@@ -3855,10 +3855,6 @@ def semaphore_view(semaphore, timeout=5):
         return wrapped_view
     return decorator
 
-def print_raw_sql(queryset):
-    print(queryset.query)
-    print(queryset.query.sql_with_params())
-
 # Structure Blast
 #----------------
 @method_decorator(semaphore_view(shared_semaphore, timeout=5), name='dispatch')
@@ -4037,6 +4033,8 @@ class StructureBlastView(View):
                 link_commands.append(f"find /{db_name} -maxdepth 1 -exec ln -s {{}} /db/ \\;")
 
             link_command_str = " && ".join(link_commands)
+            print('LINK')
+            print(link_command_str)
 
             command = [
                 'sh', '-c',
@@ -4068,6 +4066,7 @@ class StructureBlastView(View):
                     return None, f"Foldseek execution failed: {logs}"
 
                 result_file = os.path.join(output_dir, 'result.txt')
+
                 if not os.path.exists(result_file):
                     return None, "Foldseek did not produce any results"
 
@@ -4104,6 +4103,8 @@ class StructureBlastView(View):
         """
         with open(result_file_path, 'r') as file:
             output_content = file.readlines()
+
+        output_content = set(output_content)
 
         temp_data = []
         try:
